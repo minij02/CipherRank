@@ -276,12 +276,13 @@ private:
         return cipherChunks;
     }
 
-    /// <summary>
-    /// 서버가 타겟을 모르는 상태에서 캐싱된 대각선 평문과 타겟 암호문을 동형 곱셈하여 이웃 서브그래프를 추출합니다.
+    // <summary>
+    /// 서버가 타겟의 위치를 모르는 상태에서 캐싱된 대각선 평문과 타겟 암호문 배열(Chunks)을 동형 곱셈하여,
+    /// 여러 청크에 분산된 타겟들의 이웃 서브그래프를 병렬로 추출합니다.
     /// </summary>
-    /// <param name="cipherTarget">클라이언트로부터 수신한 병렬 타겟 지갑 암호문입니다.</param>
+    /// <param name="cipherChunks">클라이언트로부터 수신한 병렬 타겟 지갑들의 암호문 배열(Chunking 적용)입니다.</param>
     /// <param name="pirDiagonals">사전 연산되어 캐싱된 퍼블릭 매트릭스의 대각선 평문 리스트입니다.</param>
-    /// <returns>동형 추출된 이웃 가중치가 담긴 암호문입니다.</returns>
+    /// <returns>각 청크별로 동형 추출된 이웃 가중치가 담긴 암호문 배열입니다.</returns>
     vector<Ciphertext> ExtractBlindSubgraph(const vector<Ciphertext>& cipherChunks, const vector<PirDiag>& pirDiagonals) {
         cout << "\n[Phase 3] Server: Parallel Blind Subgraph Extraction" << endl;
         vector<Ciphertext> neighborsChunks;
