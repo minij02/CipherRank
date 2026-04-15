@@ -76,6 +76,8 @@ private:
     size_t slot_count;
     double scale;
     size_t num_targets;
+    int batch_size;
+    int num_chunks;
 
 public:
     /// <summary>
@@ -108,10 +110,10 @@ public:
         }
         
         // Phase 2
-        Ciphertext cipherTarget = EncryptTargets();
+        vector<Ciphertext> cipherTarget = EncryptTargets();
         
         // Phase 3
-        Ciphertext cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals);
+        vector<Ciphertext> cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals);
         
         // Phase 4
         vector<vector<int>> allTop64Indices;
@@ -210,14 +212,8 @@ private:
         
         int pirCapacity = static_cast<int>(slot_count / pirBlockSize);
         int prCapacity  = static_cast<int>(slot_count / prBlockSize);
-        int max_allowed = min(pirCapacity, prCapacity);
-
-        if (num_targets > static_cast<size_t>(max_allowed)) {
-            cout << " [WARNING] SIMD maximum capacity exceeded. Processing only the top " << max_allowed << " targets." << endl;
-            num_targets = max_allowed;
-            validWalletIds.resize(num_targets);
-            targetGlobalIndices.resize(num_targets);
-        }
+        batch_size = min(pirCapacity, prCapacity);
+        num_chunks = ceil(static_cast<double>(num_targets) / batch_size);
 
         double HALF_LIFE = 365.0 * 24.0 * 60.0 * 60.0;
         for (const auto& edge : rawEdges) {
@@ -239,7 +235,7 @@ private:
         for (int d = 0; d < nGlobal; d++) {
             vector<double> diag(slot_count, 0.0);
             bool isZero = true;
-            for (size_t c = 0; c < num_targets; c++) {
+            for (size_t c = 0; c < batch_size; c++) {
                 for (int row = 0; row < nGlobal; row++) {
                     double val = M_total[row][(row + d) % nGlobal];
                     diag[c * pirBlockSize + row] = val;
@@ -259,21 +255,25 @@ private:
     /// 클라이언트에서 타겟 지갑들의 인덱스를 기반으로 One-Hot Vector를 생성하고 이를 SIMD 방식으로 암호화합니다.
     /// </summary>
     /// <returns>서버에 전송하기 위해 다수의 타겟이 하나의 배열에 병렬로 암호화된 암호문입니다.</returns>
-    Ciphertext EncryptTargets() {
-        cout << "\n[Phase 2] Client: " << num_targets << "Multi-Target SIMD FHE-PIR Encryption" << endl;
-        vector<double> v_target(slot_count, 0.0);
+    vector<Ciphertext> EncryptTargets() {
+        cout << "\n[Phase 2] Client: " << num_chunks << "Multi-Target SIMD FHE-PIR Encryption" << endl;
+        vector<Ciphertext> cipherChunks;
 
-        for (size_t c = 0; c <num_targets; c++) {
-            int idx = targetGlobalIndices[c];
-            v_target[c * pirBlockSize + idx] = 1.0;
-            v_target[c * pirBlockSize + pirInnerDim + idx] = 1.0;
+        for (int k = 0; k < num_chunks; k++) {
+            vector<double> v_target(slot_count, 0.0);
+            int start_idx = k * batch_size;
+            int end_idx = min(static_cast<int>(num_targets), start_idx + batch_size);
+            
+            for (int c = 0; c < (end_idx - start_idx); c++) {
+                int idx = targetGlobalIndices[start_idx + c];
+                v_target[c * pirBlockSize + idx] = 1.0;
+                v_target[c * pirBlockSize + pirInnerDim + idx] = 1.0;
+            }
+            Plaintext plainTarget; encoder->encode(v_target, scale, plainTarget);
+            Ciphertext cipherTarget; encryptor->encrypt(plainTarget, cipherTarget);
+            cipherChunks.push_back(cipherTarget);
         }
-
-        Plaintext plainTarget;
-        encoder->encode(v_target, scale, plainTarget);
-        Ciphertext cipherTarget;
-        encryptor->encrypt(plainTarget, cipherTarget);
-        return cipherTarget;
+        return cipherChunks;
     }
 
     /// <summary>
@@ -282,77 +282,84 @@ private:
     /// <param name="cipherTarget">클라이언트로부터 수신한 병렬 타겟 지갑 암호문입니다.</param>
     /// <param name="pirDiagonals">사전 연산되어 캐싱된 퍼블릭 매트릭스의 대각선 평문 리스트입니다.</param>
     /// <returns>동형 추출된 이웃 가중치가 담긴 암호문입니다.</returns>
-    Ciphertext ExtractBlindSubgraph(const Ciphertext& cipherTarget, const vector<PirDiag>& pirDiagonals) {
+    vector<Ciphertext> ExtractBlindSubgraph(const vector<Ciphertext>& cipherChunks, const vector<PirDiag>& pirDiagonals) {
         cout << "\n[Phase 3] Server: Parallel Blind Subgraph Extraction" << endl;
-        Ciphertext cipherNeighbors;
-        bool isNeighborsInitialized = false;
+        vector<Ciphertext> neighborsChunks;
 
-        for (const auto& item : pirDiagonals) {
-            Ciphertext rotated, multiplied;
-            evaluator->rotate_vector(cipherTarget, item.d, galois_keys, rotated);
-            evaluator->multiply_plain(rotated, item.plain, multiplied);
-            evaluator->rescale_to_next_inplace(multiplied);
-            multiplied.scale() = scale;
+        for (int k = 0; k < num_chunks; k++) {
+            Ciphertext cipherNeighbors; bool isInit = false;
+            for (const auto& item : pirDiagonals) {
+                Ciphertext rotated, multiplied;
+                evaluator->rotate_vector(cipherChunks[k], item.d, galois_keys, rotated);
+                evaluator->multiply_plain(rotated, item.plain, multiplied);
+                evaluator->rescale_to_next_inplace(multiplied);
+                multiplied.scale() = scale;
 
-            if (!isNeighborsInitialized) {
-                cipherNeighbors = multiplied;
-                isNeighborsInitialized = true;
-            } else {
-                evaluator->mod_switch_to_inplace(cipherNeighbors, multiplied.parms_id());
-                cipherNeighbors.scale() = multiplied.scale();
-                Ciphertext tmp;
-                evaluator->add(cipherNeighbors, multiplied, tmp);
-                cipherNeighbors = tmp;
+                if (!isInit) { cipherNeighbors = multiplied; isInit = true; } 
+                else {
+                    evaluator->mod_switch_to_inplace(cipherNeighbors, multiplied.parms_id());
+                    cipherNeighbors.scale() = multiplied.scale();
+                    Ciphertext tmp; evaluator->add(cipherNeighbors, multiplied, tmp);
+                    cipherNeighbors = tmp;
+                }
+            }
+            neighborsChunks.push_back(cipherNeighbors);
+        }
+        return neighborsChunks;
+    }
+
+    /// <summary>
+    /// 여러 개의 청크로 나뉜 이웃 가중치 암호문 배열을 복호화하여, 
+    /// 각 타겟별로 서브그래프를 구성할 상위 핵심 노드들의 인덱스를 매핑합니다.
+    /// </summary>
+    /// <param name="neighborsChunks">Phase 3에서 병렬 추출된 암호문 배열(Chunks)입니다.</param>
+    /// <param name="outTop64">각 타겟별로 64차원 서브그래프를 구성할 최상위 노드들의 인덱스 목록이 반환됩니다.</param>
+    /// <param name="outTargetSubIdx">각 타겟이 64차원 서브그래프 내에서 몇 번째 인덱스에 위치하는지 반환됩니다.</param>
+    void ResolveSubgraphIndices(const vector<Ciphertext>& neighborsChunks, vector<vector<int>>& outTop64, vector<int>& outTargetSubIdx) {
+        cout << "\n[Phase 4] Client: SIMD Subgraph Resolution & Mapping" << endl;
+        
+        for (int k = 0; k < num_chunks; k++) {
+            Plaintext decryptedNeighbors;
+            decryptor->decrypt(neighborsChunks[k], decryptedNeighbors);
+            vector<double> decodedNeighbors;
+            encoder->decode(decryptedNeighbors, decodedNeighbors);
+            int start_idx = k * batch_size;
+            int end_idx = min(static_cast<int>(num_targets), start_idx + batch_size);
+
+            struct Score { int index; double score; };
+
+            for (size_t c = 0; c < (end_idx - start_idx); c++) {
+                vector<Score> scores;
+                for (int i = 0; i < nGlobal; i++) scores.push_back({i, decodedNeighbors[c * pirBlockSize + i]});
+                sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) { return a.score > b.score; });
+
+                vector<int> top64;
+                for (int i = 0; i < nSub; i++) top64.push_back(scores[i].index);
+
+                int targetGIdx = targetGlobalIndices[start_idx + c];
+                if (find(top64.begin(), top64.end(), targetGIdx) == top64.end()) top64[nSub - 1] = targetGIdx;
+
+                int subIdx = -1;
+                for (int i = 0; i < nSub; i++) { if (top64[i] == targetGIdx) { subIdx = i; break; } }
+                
+                outTop64.push_back(top64);
+                outTargetSubIdx.push_back(subIdx);
             }
         }
-        return cipherNeighbors;
     }
 
     /// <summary>
-    /// 암호화된 이웃 가중치를 복호화하여 서브그래프를 구성할 상위 핵심 노드들의 인덱스를 매핑합니다.
-    /// </summary>
-    /// <param name="cipherNeighbors">블라인드 추출된 이웃 가중치 암호문입니다.</param>
-    /// <param name="outTop64">각 타겟별로 64차원 서브그래프를 구성할 최상위 노드들의 인덱스 목록이 반환됩니다.</param>
-    void ResolveSubgraphIndices(const Ciphertext& cipherNeighbors, vector<vector<int>>& outTop64, vector<int>& outTargetSubIdx) {
-        cout << "\n[Phase 4] Client: SIMD Subgraph Resolution & Mapping" << endl;
-        Plaintext decryptedNeighbors;
-        decryptor->decrypt(cipherNeighbors, decryptedNeighbors);
-        vector<double> decodedNeighbors;
-        encoder->decode(decryptedNeighbors, decodedNeighbors);
-
-        struct Score { int index; double score; };
-
-        for (size_t c = 0; c < num_targets; c++) {
-            vector<Score> scores;
-            for (int i = 0; i < nGlobal; i++) scores.push_back({i, decodedNeighbors[c * pirBlockSize + i]});
-            sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) { return a.score > b.score; });
-
-            vector<int> top64;
-            for (int i = 0; i < nSub; i++) top64.push_back(scores[i].index);
-
-            int targetGIdx = targetGlobalIndices[c];
-            if (find(top64.begin(), top64.end(), targetGIdx) == top64.end()) top64[nSub - 1] = targetGIdx;
-
-            int subIdx = -1;
-            for (int i = 0; i < nSub; i++) { if (top64[i] == targetGIdx) { subIdx = i; break; } }
-            
-            outTop64.push_back(top64);
-            outTargetSubIdx.push_back(subIdx);
-        }
-    }
-
-    /// <summary>
-    /// 서브그래프 위에서 동형암호 기반의 병렬 PageRank 거듭제곱 루프를 실행하고, 평문 연산 결과와 비교하여 오차율을 검증합니다.
+    /// 청크(Chunk) 단위로 쪼개진 서브그래프 위에서 동형암호 기반의 병렬 PageRank 거듭제곱 루프를 실행하고, 
+    /// 평문 연산 결과와 비교하여 오차율을 검증합니다.
     /// </summary>
     /// <param name="allTop64">각 타겟별 서브그래프를 구성하는 핵심 노드들의 인덱스 목록입니다.</param>
     /// <param name="M_pub">전역 퍼블릭 매트릭스 원본입니다.</param>
     /// <param name="allTargetSubIdx">각 서브그래프 내 타겟 지갑들의 인덱스 배열입니다.</param>
     void EvaluatePageRank(const vector<vector<int>>& allTop64, const vector<vector<double>>& M_pub, const vector<int>& allTargetSubIdx) {
-        cout << "\n[Phase 5] FHE & Plaintext PageRank Iteration (Parallel Processig)" << endl;
+        cout << "\n[Phase 5] FHE & Plaintext PageRank Iteration (Executing " << num_chunks << " Chunks)" << endl;
 
         vector<vector<vector<double>>> all_M_sub(num_targets, vector<vector<double>>(nSub, vector<double>(nSub, 0.0)));
         vector<vector<double>> all_plainV(num_targets, vector<double>(nSub, 1.0 / nSub));
-
         vector<vector<double>> logicalV(num_targets, vector<double>(nSub, 1.0 / nSub));
 
         for (size_t c = 0; c < num_targets; c++) {
@@ -369,7 +376,6 @@ private:
             }
         }
 
-        // 타겟별 평문 Ground Truth 계산
         int ITERATIONS = 10;
         for (int iter = 1; iter <= ITERATIONS; iter++) {
             for (size_t c = 0; c < num_targets; c++) {
@@ -381,80 +387,86 @@ private:
             }
         }
 
-        // FHE 병렬 PageRank 계산
-        vector<PirDiag> prDiagonals;
-        for (int d = 0; d < nSub; d++) {
-            vector<double> diag(slot_count, 0.0);
-            bool isZero = true;
-            for (size_t c = 0; c < num_targets; c++) {
-                for (int row = 0; row < nSub; row++) {
-                    double val = all_M_sub[c][row][(row + d) % nSub];
-                    diag[c * prBlockSize + row] = val;
-                    if (val > 0.0) isZero = false;
-                }
-            }
-            if (!isZero) {
-                Plaintext plainDiag;
-                encoder->encode(diag, scale, plainDiag);
-                prDiagonals.push_back({d, plainDiag});
-            }
-        }
+        // FHE 병렬 PageRank 계산 (Chunk 단위 처리)
+        for (int k = 0; k < num_chunks; k++) {
+            int start_idx = k * batch_size;
+            int end_idx = min(static_cast<int>(num_targets), start_idx + batch_size);
+            int current_batch = end_idx - start_idx;
 
-        for (int iter = 1; iter <= ITERATIONS; iter++) {
-            vector<double> vRepeated(slot_count, 0.0);
-            for (size_t c = 0; c < num_targets; c++) {
-                for (int i = 0; i < nSub; i++) {
-                    vRepeated[c * prBlockSize + i] = logicalV[c][i];
-                    vRepeated[c * prBlockSize + prInnerDim + i] = logicalV[c][i];
+            vector<PirDiag> prDiagonals;
+            for (int d = 0; d < nSub; d++) {
+                vector<double> diag(slot_count, 0.0);
+                bool isZero = true;
+                for (size_t c = 0; c < current_batch; c++) {
+                    for (int row = 0; row < nSub; row++) {
+                        double val = all_M_sub[start_idx + c][row][(row + d) % nSub];
+                        diag[c * prBlockSize + row] = val;
+                        if (val > 0.0) isZero = false;
+                    }
+                }
+                if (!isZero) {
+                    Plaintext plainDiag;
+                    encoder->encode(diag, scale, plainDiag);
+                    prDiagonals.push_back({d, plainDiag});
                 }
             }
 
-            Plaintext plainVEnc;
-            encoder->encode(vRepeated, scale, plainVEnc);
-            Ciphertext cipherV;
-            encryptor->encrypt(plainVEnc, cipherV);
+            for (int iter = 1; iter <= ITERATIONS; iter++) {
+                vector<double> vRepeated(slot_count, 0.0);
+                for (size_t c = 0; c < current_batch; c++) {
+                    for (int i = 0; i < nSub; i++) {
+                        vRepeated[c * prBlockSize + i] = logicalV[start_idx + c][i];
+                        vRepeated[c * prBlockSize + prInnerDim + i] = logicalV[start_idx + c][i];
+                    }
+                }
 
-            Ciphertext cipherResult;
-            bool isResultInitialized = false;
+                Plaintext plainVEnc;
+                encoder->encode(vRepeated, scale, plainVEnc);
+                Ciphertext cipherV;
+                encryptor->encrypt(plainVEnc, cipherV);
 
-            for (const auto& item : prDiagonals) {
-                Ciphertext rotated, multiplied;
-                evaluator->rotate_vector(cipherV, item.d, galois_keys, rotated);
-                evaluator->multiply_plain(rotated, item.plain, multiplied);
-                evaluator->rescale_to_next_inplace(multiplied);
-                multiplied.scale() = scale;
+                Ciphertext cipherResult;
+                bool isResultInitialized = false;
 
-                if (!isResultInitialized) {
-                    cipherResult = multiplied;
-                    isResultInitialized = true;
-                } else {
-                    evaluator->mod_switch_to_inplace(cipherResult, multiplied.parms_id());
-                    cipherResult.scale() = multiplied.scale();
-                    Ciphertext tmp;
-                    evaluator->add(cipherResult, multiplied, tmp);
-                    cipherResult = tmp;
+                for (const auto& item : prDiagonals) {
+                    Ciphertext rotated, multiplied;
+                    evaluator->rotate_vector(cipherV, item.d, galois_keys, rotated);
+                    evaluator->multiply_plain(rotated, item.plain, multiplied);
+                    evaluator->rescale_to_next_inplace(multiplied);
+                    multiplied.scale() = scale;
+
+                    if (!isResultInitialized) {
+                        cipherResult = multiplied;
+                        isResultInitialized = true;
+                    } else {
+                        evaluator->mod_switch_to_inplace(cipherResult, multiplied.parms_id());
+                        cipherResult.scale() = multiplied.scale();
+                        Ciphertext tmp;
+                        evaluator->add(cipherResult, multiplied, tmp);
+                        cipherResult = tmp;
+                    }
+                }
+
+                Plaintext decrypted;
+                decryptor->decrypt(cipherResult, decrypted);
+                vector<double> decoded; 
+                encoder->decode(decrypted, decoded);
+
+                for(size_t c = 0; c < current_batch; c++) {
+                    double sum = 0.0;
+                    for(int i = 0; i < nSub; i++) {
+                        double val = max(0.0, decoded[c * prBlockSize + i]); 
+                        logicalV[start_idx + c][i] = val; 
+                        sum += val;
+                    }
+                    if (sum == 0.0) {
+                       for(int i = 0; i < nSub; i++) logicalV[start_idx + c][i] = 1.0 / nSub;
+                    } else {
+                       for(int i = 0; i < nSub; i++) logicalV[start_idx + c][i] /= sum;
+                    }
                 }
             }
-
-            Plaintext decrypted;
-            decryptor->decrypt(cipherResult, decrypted);
-            vector<double> decoded; 
-            encoder->decode(decrypted, decoded);
-
-            for(size_t c = 0; c < num_targets; c++) {
-                double sum = 0.0;
-                for(int i = 0; i < nSub; i++) {
-                    double val = max(0.0, decoded[c * prBlockSize + i]); // Sanitize
-                    logicalV[c][i] = val;
-                    sum += val;
-                }
-                if (sum == 0.0) {
-                   for(int i = 0; i < nSub; i++) logicalV[c][i] = 1.0 / nSub;
-                } else {
-                   for(int i = 0; i < nSub; i++) logicalV[c][i] /= sum; // Normalize
-                }
-            }
-        }
+        } 
 
         cout << "\n[Phase 6] Precision Validation & Smart Contract Logic" << endl;
         cout << fixed << setprecision(6);
