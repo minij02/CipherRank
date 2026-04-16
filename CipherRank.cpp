@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <iomanip>
 #include <omp.h>
+#include <chrono>
 #include "seal/seal.h"
 
 using namespace std;
@@ -61,9 +62,60 @@ struct BsgsDiag {
 };
 
 /// <summary>
+/// BSGS 파라미터를 담을 구조체입니다.
+/// </summary>
+struct BSGSParams {
+    /// <summary>Baby-Step 크기입니다.</summary>
+    int m1;
+
+    /// <summary>Giant-Step 크기입니다.</summary>
+    int m2;
+};
+
+/// <summary>
+/// N차원 서브그래프에 대해 최소 비용을 갖는 비대칭 BSGS 파라미터를 탐색합니다.
+/// </summary>
+/// <param name="N">목표 차원 (nSub, 예: 256, 1024)</param>
+/// <param name="giant_weight">Baby Step 대비 Giant Step의 상대적 비용 가중치</param>
+/// <returns>탐색된 최적의 m1(Baby Step)과 m2(Giant Step) 값을 포함하는 BSGSParams 구조체입니다.</returns>
+/// <remarks>
+/// 단순히 제곱근(sqrt)을 사용하는 대칭 BSGS의 한계를 극복하기 위해, 
+/// 런타임 환경의 연산 프로파일링 결과를 가중치로 반영하는 Auto-Tuner 로직입니다.
+/// </remarks>
+BSGSParams FindOptimalAsymmetricBSGS(int N, double giant_weight = 2.0) {
+    int best_m1 = 1;
+    int best_m2 = N;
+    double min_cost = 1e9; // 초기값 무한대
+    
+    // m1을 1부터 N까지 늘려가며 최적의 조합을 찾음
+    for (int m1 = 1; m1 <= N; m1++) {
+        int m2 = (N + m1 - 1) / m1; // N을 커버하기 위한 최소 m2
+        
+        // 비용(Cost) 함수 = (Baby Step 횟수) + 가중치 * (Giant Step 횟수)
+        double cost = m1 + giant_weight * m2;
+        
+        if (cost < min_cost) {
+            min_cost = cost;
+            best_m1 = m1;
+            best_m2 = m2;
+        }
+    }
+    
+    cout << " [Auto-Tune] N=" << N << " -> Optimal Asymmetric BSGS: "
+         << "m1(Baby)=" << best_m1 << ", m2(Giant)=" << best_m2 
+         << " (Weight: " << giant_weight << "x)" << endl;
+         
+    return {best_m1, best_m2};
+}
+
+/// <summary>
 /// 데이터 조작을 차단하기 위한 서버 측 전처리와, 
 /// 타겟 익명성을 보장하는 클라이언트 측 블라인드 추출(PIR), 그리고 오차 검증을 총괄하는 코어 클래스입니다.
 /// </summary>
+/// <remarks>
+/// - 메모리 단편화 방지: 모든 FHE 내부 연산은 동적 할당을 최소화하는 _inplace 계열 함수를 사용합니다.
+/// - 멀티스레딩 제어: OpenMP를 통해 Phase 3 및 Phase 5의 Chunk 단위 병렬 처리를 수행합니다.
+/// </remarks>
 class UltimatePrivacyPipeline {
 private:
     vector<int> requestedWalletIds;
@@ -418,8 +470,37 @@ private:
             }
         }
 
-        int m1 = 16; // Baby-Step 크기
-        int m2 = 16;  // Giant-Step 크기
+        cout << " [Auto-Tune] Measuring the rotation cost of the current system..." << endl;
+        
+        Plaintext dummy_plain;
+        encoder->encode(vector<double>(pirBlockSize, 1.0), scale, dummy_plain);
+        Ciphertext dummy_cipher;
+        encryptor->encrypt(dummy_plain, dummy_cipher); 
+
+        auto start_baby = chrono::high_resolution_clock::now();
+        Ciphertext rotated_baby;
+        evaluator->rotate_vector(dummy_cipher, 1, galois_keys, rotated_baby);
+        auto end_baby = chrono::high_resolution_clock::now();
+        double baby_time = chrono::duration<double>(end_baby - start_baby).count();
+
+        auto start_giant = chrono::high_resolution_clock::now();
+        Ciphertext rotated_giant;
+        evaluator->rotate_vector(dummy_cipher, 16, galois_keys, rotated_giant);
+        auto end_giant = chrono::high_resolution_clock::now();
+        double giant_time = chrono::duration<double>(end_giant - start_giant).count();
+
+        double real_weight = (baby_time > 0) ? (giant_time / baby_time) : 1.0;
+        
+        if (real_weight < 1.0) real_weight = 1.0; 
+        if (real_weight > 5.0) real_weight = 5.0;
+
+        cout << "   -> Baby Step:  " << baby_time << " sec" << endl;
+        cout << "   -> Giant Step: " << giant_time << " sec" << endl;
+        cout << "   -> [Result] Giant/Baby weight: " << real_weight << "times" << endl;
+
+        BSGSParams params = FindOptimalAsymmetricBSGS(nSub, real_weight);
+        int m1 = params.m1; // Baby-Step 크기
+        int m2 = params.m2;  // Giant-Step 크기
 
         // FHE 병렬 PageRank 계산 (Chunk 단위 처리)
         #pragma omp parallel for
