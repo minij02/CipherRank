@@ -155,15 +155,21 @@ private:
     }
 
     /// <summary>
-    /// 로컬 트랜잭션 데이터를 로드하고, 먼지 트랜잭션을 가지치기하여
-    /// 글로벌 퍼블릭 매트릭스(<paramref name="outM_pub"/>)와 블라인드 탐색용 대각선 캐싱 데이터를 생성합니다.
+    /// 로컬 트랜잭션 데이터를 로드하여 글로벌 퍼블릭 매트릭스(<paramref name="outM_pub"/>)를 구성하고,
+    /// 희소(Sparse) 인접 리스트 기반의 2-Hop 탐색을 통해 블라인드 추출용 대각선 평문 데이터를 직접 생성합니다.
     /// </summary>
-    /// <param name="outM_pub">Time-decay가 적용된 글로벌 퍼블릭 매트릭스가 반환됩니다.</param>
-    /// <returns>PIR 연산을 위해 1-Hop, 2-Hop이 모두 포함되어 대각선 패킹된 평문 리스트입니다.</returns>
+    /// <param name="outM_pub">Phase 5(PageRank) 서브그래프 추출을 위해 Time-decay가 적용된 1-Hop 원본 매트릭스가 반환됩니다.</param>
+    /// <returns>동형암호 PIR 연산을 위해 1-Hop과 2-Hop 가중치가 비중(Beta)에 따라 누적된 대각선 평문(Plaintext) 리스트입니다.</returns>
+    /// <remarks>
+    /// [성능 최적화(Performance Optimizations)]
+    /// 희소성(Sparsity) 활용: 기존 O(N^3) Dense 행렬 곱셈을 O(V * d^2) 수준의 Adjacency List 탐색으로 교체하여 시간 복잡도를 낮췄습니다.
+    /// 가지치기(Pruning): 영향력이 미미한 1-Hop 간선(Threshold 미만)은 2-Hop 전파를 차단하여 연산 폭발을 억제합니다.
+    /// Direct Diagonal: 중간 산출물인 M_total 행렬을 아예 생성하지 않고, 해시맵(sparseDiag)을 이용해 O(nnz) 타임으로 대각선 위치에 즉시 누적합니다.
+    /// </remarks>
     vector<PirDiag> PreparePublicData(vector<vector<double>>& outM_pub) {
         cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation" << endl;
 
-        string snapFilePath = "soc-sign-bitcoinotc.csv";
+        string snapFilePath = "../soc-sign-bitcoinotc.csv";
         ifstream file(snapFilePath);
         vector<Edge> rawEdges;
         unordered_map<int, int> frequency;
@@ -215,38 +221,56 @@ private:
         batch_size = min(pirCapacity, prCapacity);
         num_chunks = ceil(static_cast<double>(num_targets) / batch_size);
 
+        vector<vector<pair<int, double>>> outAdj(nGlobal);
         double HALF_LIFE = 365.0 * 24.0 * 60.0 * 60.0;
+
         for (const auto& edge : rawEdges) {
             if (globalNodeToIndex.count(edge.src) && globalNodeToIndex.count(edge.tgt)) {
+                int srcIdx = globalNodeToIndex[edge.src];
+                int tgtIdx = globalNodeToIndex[edge.tgt];
                 double decay = pow(0.5, (maxTime - edge.time) / HALF_LIFE);
-                outM_pub[globalNodeToIndex[edge.tgt]][globalNodeToIndex[edge.src]] += (edge.weight * decay);
+                double w = edge.weight * decay;
+
+                outM_pub[tgtIdx][srcIdx] += w; 
+                outAdj[srcIdx].push_back({tgtIdx, w});
             }
         }
 
-        vector<vector<double>> M_total(nGlobal, vector<double>(nGlobal, 0.0));
-        for (int i = 0; i < nGlobal; i++) {
-            for (int j = 0; j < nGlobal; j++) {
-                M_total[i][j] = outM_pub[i][j];
-                for (int k = 0; k < nGlobal; k++) M_total[i][j] += outM_pub[i][k] * outM_pub[k][j];
+        vector<unordered_map<int, double>> sparseDiag(nGlobal);
+
+        double beta1 = 1.0;
+        double beta2 = 0.30;
+        double PRUNE_THRESHOLD = 0.05; 
+
+        for (int src = 0; src < nGlobal; src++) {
+            for (const auto& [mid, w1] : outAdj[src]) {
+                int d1 = (src - mid + nGlobal) % nGlobal;
+                sparseDiag[d1][mid] += beta1 * w1;
+
+                if (w1 < PRUNE_THRESHOLD) continue;
+
+                for (const auto& [dst, w2] : outAdj[mid]) {
+                    int d2 = (src - dst + nGlobal) % nGlobal;
+                    sparseDiag[d2][dst] += beta2 * w1 * w2;
+                }
             }
         }
 
         vector<PirDiag> pirDiagonals;
         for (int d = 0; d < nGlobal; d++) {
-            vector<double> diag(slot_count, 0.0);
-            bool isZero = true;
-            for (size_t c = 0; c < batch_size; c++) {
-                for (int row = 0; row < nGlobal; row++) {
-                    double val = M_total[row][(row + d) % nGlobal];
-                    diag[c * pirBlockSize + row] = val;
-                    if (val > 0) isZero = false;
+            if (sparseDiag[d].empty()) continue;
+
+            vector<double> diag_flat(slot_count, 0.0);
+
+            for (const auto& [row, val] : sparseDiag[d]) {
+                for (size_t c = 0; c < batch_size; c++) {
+                    diag_flat[c * pirBlockSize + row] = val;
                 }
             }
-            if (!isZero) {
-                Plaintext plainDiag;
-                encoder->encode(diag, scale, plainDiag);
-                pirDiagonals.push_back({d, plainDiag});
-            }
+
+            Plaintext plainDiag;
+            encoder->encode(diag_flat, scale, plainDiag);
+            pirDiagonals.push_back({d, plainDiag});
         }
         return pirDiagonals;
     }
