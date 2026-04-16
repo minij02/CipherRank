@@ -207,7 +207,7 @@ private:
 
         vector<int> galois_steps;
         for (int i = 1; i <= nGlobal; i++) galois_steps.push_back(i);
-        keygen.create_galois_keys(galois_keys);
+        keygen.create_galois_keys(galois_steps, galois_keys);
 
         encoder = make_unique<CKKSEncoder>(*context);
         encryptor = make_unique<Encryptor>(*context, public_key);
