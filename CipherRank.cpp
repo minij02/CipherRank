@@ -15,6 +15,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <iomanip>
+#include <omp.h>
 #include "seal/seal.h"
 
 using namespace std;
@@ -48,6 +49,17 @@ struct PirDiag {
     Plaintext plain;
 };
 
+struct BsgsDiag { 
+    /// <summary>Baby-Step 인덱스입니다 (0 ~ m1-1).</summary>
+    int i; 
+
+    /// <summary>Giant-Step 인덱스입니다 (0 ~ m2-1).</summary>
+    int j; 
+
+    /// <summary>역방향 시프트가 적용된 후 인코딩된 대각선 평문 데이터입니다.</summary>
+    Plaintext plain; 
+};
+
 /// <summary>
 /// 데이터 조작을 차단하기 위한 서버 측 전처리와, 
 /// 타겟 익명성을 보장하는 클라이언트 측 블라인드 추출(PIR), 그리고 오차 검증을 총괄하는 코어 클래스입니다.
@@ -58,11 +70,11 @@ private:
     vector<int> validWalletIds;
     vector<int> targetGlobalIndices;
 
-    const int nGlobal = 256;
+    const int nGlobal = 1024;
     const int pirInnerDim = nGlobal;
     const int pirBlockSize = 2 * pirInnerDim;
 
-    const int nSub = 64;
+    const int nSub = 256;
     const int prInnerDim = nSub;
     const int prBlockSize = 2 * prInnerDim;  
 
@@ -116,12 +128,12 @@ public:
         vector<Ciphertext> cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals);
         
         // Phase 4
-        vector<vector<int>> allTop64Indices;
+        vector<vector<int>> allTopNodesIndices;
         vector<int> allTargetSubIdx;
-        ResolveSubgraphIndices(cipherNeighbors, allTop64Indices, allTargetSubIdx);
+        ResolveSubgraphIndices(cipherNeighbors, allTopNodesIndices, allTargetSubIdx);
         
         // Phase 5 & 6
-        EvaluatePageRank(allTop64Indices, M_pub, allTargetSubIdx);
+        EvaluatePageRank(allTopNodesIndices, M_pub, allTargetSubIdx);
     }
 
 private:
@@ -130,7 +142,7 @@ private:
     /// </summary>
     void InitializeFHE() {
         EncryptionParameters parms(scheme_type::ckks);
-        size_t poly_modulus_degree = 8192;
+        size_t poly_modulus_degree = 16384;
         parms.set_poly_modulus_degree(poly_modulus_degree);
         parms.set_coeff_modulus(CoeffModulus::Create(poly_modulus_degree, { 60, 45, 45, 60 }));
 
@@ -140,6 +152,9 @@ private:
         PublicKey public_key;
         keygen.create_public_key(public_key);
         SecretKey secret_key = keygen.secret_key();
+
+        vector<int> galois_steps;
+        for (int i = 1; i <= nGlobal; i++) galois_steps.push_back(i);
         keygen.create_galois_keys(galois_keys);
 
         encoder = make_unique<CKKSEncoder>(*context);
@@ -163,7 +178,7 @@ private:
     vector<PirDiag> PreparePublicData(vector<vector<double>>& outM_pub) {
         cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation" << endl;
 
-        string snapFilePath = "soc-sign-bitcoinotc.csv";
+        string snapFilePath = "../soc-sign-bitcoinotc.csv";
         ifstream file(snapFilePath);
         vector<Edge> rawEdges;
         unordered_map<int, int> frequency;
@@ -225,9 +240,16 @@ private:
 
         vector<vector<double>> M_total(nGlobal, vector<double>(nGlobal, 0.0));
         for (int i = 0; i < nGlobal; i++) {
+            for (int k = 0; k < nGlobal; k++) { 
+                double outM_ik = outM_pub[i][k];
+                if (outM_ik == 0.0) continue;
+                for (int j = 0; j < nGlobal; j++) {
+                    M_total[i][j] += outM_ik * outM_pub[k][j];
+                }
+            }
+
             for (int j = 0; j < nGlobal; j++) {
-                M_total[i][j] = outM_pub[i][j];
-                for (int k = 0; k < nGlobal; k++) M_total[i][j] += outM_pub[i][k] * outM_pub[k][j];
+                M_total[i][j] += outM_pub[i][j];
             }
         }
 
@@ -285,26 +307,34 @@ private:
     /// <returns>각 청크별로 동형 추출된 이웃 가중치가 담긴 암호문 배열입니다.</returns>
     vector<Ciphertext> ExtractBlindSubgraph(const vector<Ciphertext>& cipherChunks, const vector<PirDiag>& pirDiagonals) {
         cout << "\n[Phase 3] Server: Parallel Blind Subgraph Extraction" << endl;
-        vector<Ciphertext> neighborsChunks;
+        vector<Ciphertext> neighborsChunks(num_chunks);
 
+        #pragma omp parallel for
         for (int k = 0; k < num_chunks; k++) {
-            Ciphertext cipherNeighbors; bool isInit = false;
-            for (const auto& item : pirDiagonals) {
-                Ciphertext rotated, multiplied;
-                evaluator->rotate_vector(cipherChunks[k], item.d, galois_keys, rotated);
-                evaluator->multiply_plain(rotated, item.plain, multiplied);
-                evaluator->rescale_to_next_inplace(multiplied);
-                multiplied.scale() = scale;
+            Evaluator thread_evaluator(*context);
 
-                if (!isInit) { cipherNeighbors = multiplied; isInit = true; } 
-                else {
-                    evaluator->mod_switch_to_inplace(cipherNeighbors, multiplied.parms_id());
-                    cipherNeighbors.scale() = multiplied.scale();
-                    Ciphertext tmp; evaluator->add(cipherNeighbors, multiplied, tmp);
-                    cipherNeighbors = tmp;
+            Ciphertext cipherNeighbors; 
+            bool isInit = false;
+
+            for (const auto& item : pirDiagonals) {
+                Ciphertext rotated; 
+
+                thread_evaluator.rotate_vector(cipherChunks[k], item.d, galois_keys, rotated);
+                thread_evaluator.multiply_plain_inplace(rotated, item.plain); 
+                thread_evaluator.rescale_to_next_inplace(rotated);
+                rotated.scale() = scale;
+
+                if (!isInit) { 
+                    cipherNeighbors = rotated; 
+                    isInit = true; 
+                } else {
+                    thread_evaluator.mod_switch_to_inplace(cipherNeighbors, rotated.parms_id());
+                    cipherNeighbors.scale() = rotated.scale();
+
+                    thread_evaluator.add_inplace(cipherNeighbors, rotated); 
                 }
             }
-            neighborsChunks.push_back(cipherNeighbors);
+            neighborsChunks[k] = cipherNeighbors;
         }
         return neighborsChunks;
     }
@@ -314,9 +344,9 @@ private:
     /// 각 타겟별로 서브그래프를 구성할 상위 핵심 노드들의 인덱스를 매핑합니다.
     /// </summary>
     /// <param name="neighborsChunks">Phase 3에서 병렬 추출된 암호문 배열(Chunks)입니다.</param>
-    /// <param name="outTop64">각 타겟별로 64차원 서브그래프를 구성할 최상위 노드들의 인덱스 목록이 반환됩니다.</param>
-    /// <param name="outTargetSubIdx">각 타겟이 64차원 서브그래프 내에서 몇 번째 인덱스에 위치하는지 반환됩니다.</param>
-    void ResolveSubgraphIndices(const vector<Ciphertext>& neighborsChunks, vector<vector<int>>& outTop64, vector<int>& outTargetSubIdx) {
+    /// <param name="outTopNodes">각 타겟별로 nSub차원 서브그래프를 구성할 최상위 노드들의 인덱스 목록이 반환됩니다.</param>
+    /// <param name="outTargetSubIdx">각 타겟이 nSub차원 서브그래프 내에서 몇 번째 인덱스에 위치하는지 반환됩니다.</param>
+    void ResolveSubgraphIndices(const vector<Ciphertext>& neighborsChunks, vector<vector<int>>& outTopNodes, vector<int>& outTargetSubIdx) {
         cout << "\n[Phase 4] Client: SIMD Subgraph Resolution & Mapping" << endl;
         
         for (int k = 0; k < num_chunks; k++) {
@@ -334,16 +364,16 @@ private:
                 for (int i = 0; i < nGlobal; i++) scores.push_back({i, decodedNeighbors[c * pirBlockSize + i]});
                 sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) { return a.score > b.score; });
 
-                vector<int> top64;
-                for (int i = 0; i < nSub; i++) top64.push_back(scores[i].index);
+                vector<int> topNodes;
+                for (int i = 0; i < nSub; i++) topNodes.push_back(scores[i].index);
 
                 int targetGIdx = targetGlobalIndices[start_idx + c];
-                if (find(top64.begin(), top64.end(), targetGIdx) == top64.end()) top64[nSub - 1] = targetGIdx;
+                if (find(topNodes.begin(), topNodes.end(), targetGIdx) == topNodes.end()) topNodes[nSub - 1] = targetGIdx;
 
                 int subIdx = -1;
-                for (int i = 0; i < nSub; i++) { if (top64[i] == targetGIdx) { subIdx = i; break; } }
+                for (int i = 0; i < nSub; i++) { if (topNodes[i] == targetGIdx) { subIdx = i; break; } }
                 
-                outTop64.push_back(top64);
+                outTopNodes.push_back(topNodes);
                 outTargetSubIdx.push_back(subIdx);
             }
         }
@@ -353,10 +383,10 @@ private:
     /// 청크(Chunk) 단위로 쪼개진 서브그래프 위에서 동형암호 기반의 병렬 PageRank 거듭제곱 루프를 실행하고, 
     /// 평문 연산 결과와 비교하여 오차율을 검증합니다.
     /// </summary>
-    /// <param name="allTop64">각 타겟별 서브그래프를 구성하는 핵심 노드들의 인덱스 목록입니다.</param>
+    /// <param name="allTop">각 타겟별 서브그래프를 구성하는 핵심 노드들의 인덱스 목록입니다.</param>
     /// <param name="M_pub">전역 퍼블릭 매트릭스 원본입니다.</param>
     /// <param name="allTargetSubIdx">각 서브그래프 내 타겟 지갑들의 인덱스 배열입니다.</param>
-    void EvaluatePageRank(const vector<vector<int>>& allTop64, const vector<vector<double>>& M_pub, const vector<int>& allTargetSubIdx) {
+    void EvaluatePageRank(const vector<vector<int>>& allTopNodes, const vector<vector<double>>& M_pub, const vector<int>& allTargetSubIdx) {
         cout << "\n[Phase 5] FHE & Plaintext PageRank Iteration (Executing " << num_chunks << " Chunks)" << endl;
 
         vector<vector<vector<double>>> all_M_sub(num_targets, vector<vector<double>>(nSub, vector<double>(nSub, 0.0)));
@@ -365,7 +395,7 @@ private:
 
         for (size_t c = 0; c < num_targets; c++) {
             for (int i = 0; i < nSub; i++) {
-                for (int j = 0; j < nSub; j++) all_M_sub[c][i][j] = M_pub[allTop64[c][i]][allTop64[c][j]];
+                for (int j = 0; j < nSub; j++) all_M_sub[c][i][j] = M_pub[allTopNodes[c][i]][allTopNodes[c][j]];
             }
             double alpha = 0.85, tele = (1.0 - alpha) / nSub;
             for (int j = 0; j < nSub; j++) {
@@ -388,27 +418,38 @@ private:
             }
         }
 
+        int m1 = 16; // Baby-Step 크기
+        int m2 = 16;  // Giant-Step 크기
+
         // FHE 병렬 PageRank 계산 (Chunk 단위 처리)
+        #pragma omp parallel for
         for (int k = 0; k < num_chunks; k++) {
             int start_idx = k * batch_size;
             int end_idx = min(static_cast<int>(num_targets), start_idx + batch_size);
             int current_batch = end_idx - start_idx;
 
-            vector<PirDiag> prDiagonals;
-            for (int d = 0; d < nSub; d++) {
-                vector<double> diag(slot_count, 0.0);
-                bool isZero = true;
-                for (size_t c = 0; c < current_batch; c++) {
-                    for (int row = 0; row < nSub; row++) {
-                        double val = all_M_sub[start_idx + c][row][(row + d) % nSub];
-                        diag[c * prBlockSize + row] = val;
-                        if (val > 0.0) isZero = false;
+            vector<BsgsDiag> bsgs_diagonals;
+            for (int j = 0; j < m2; j++) {
+                for (int i = 0; i < m1; i++) {
+                    int d = j * m1 + i;
+                    if (d >= nSub) continue;
+
+                    vector<double> diag(slot_count, 0.0);
+                    bool isZero = true;
+                    for (int c = 0; c < current_batch; c++) {
+                        // Duplicate Padding 영역까지 덮도록 nSub * 2 (128) 반복
+                        for (int row = 0; row < nSub * 2; row++) {
+                            // 수학적 역방향 시프트 (음수 모듈러 연산 방지)
+                            int orig_row = ((row - j * m1) % nSub + nSub) % nSub;
+                            double val = all_M_sub[start_idx + c][orig_row][(orig_row + d) % nSub];
+                            diag[c * prBlockSize + row] = val;
+                            if (val > 0.0) isZero = false;
+                        }
                     }
-                }
-                if (!isZero) {
-                    Plaintext plainDiag;
-                    encoder->encode(diag, scale, plainDiag);
-                    prDiagonals.push_back({d, plainDiag});
+                    if (!isZero) {
+                        Plaintext plainDiag; encoder->encode(diag, scale, plainDiag);
+                        bsgs_diagonals.push_back({i, j, plainDiag});
+                    }
                 }
             }
 
@@ -426,25 +467,41 @@ private:
                 Ciphertext cipherV;
                 encryptor->encrypt(plainVEnc, cipherV);
 
+                vector<Ciphertext> baby_steps(m1);
+                baby_steps[0] = cipherV;
+                for (int i = 1; i < m1; i++) {
+                    evaluator->rotate_vector(cipherV, i, galois_keys, baby_steps[i]);
+                }
+
                 Ciphertext cipherResult;
                 bool isResultInitialized = false;
 
-                for (const auto& item : prDiagonals) {
-                    Ciphertext rotated, multiplied;
-                    evaluator->rotate_vector(cipherV, item.d, galois_keys, rotated);
-                    evaluator->multiply_plain(rotated, item.plain, multiplied);
-                    evaluator->rescale_to_next_inplace(multiplied);
-                    multiplied.scale() = scale;
+                for (int j = 0; j < m2; j++) {
+                    Ciphertext giant_acc; bool isGiantInit = false;
 
-                    if (!isResultInitialized) {
-                        cipherResult = multiplied;
-                        isResultInitialized = true;
-                    } else {
-                        evaluator->mod_switch_to_inplace(cipherResult, multiplied.parms_id());
-                        cipherResult.scale() = multiplied.scale();
-                        Ciphertext tmp;
-                        evaluator->add(cipherResult, multiplied, tmp);
-                        cipherResult = tmp;
+                    for (const auto& item : bsgs_diagonals) {
+                        if (item.j != j) continue;
+                        Ciphertext multiplied;
+                        evaluator->multiply_plain(baby_steps[item.i], item.plain, multiplied);
+                        evaluator->rescale_to_next_inplace(multiplied); multiplied.scale() = scale;
+
+                        if (!isGiantInit) { giant_acc = multiplied; isGiantInit = true; }
+                        else {
+                            evaluator->mod_switch_to_inplace(giant_acc, multiplied.parms_id());
+                            giant_acc.scale() = multiplied.scale();
+                            evaluator->add_inplace(giant_acc, multiplied);
+                        }
+                    }
+
+                    if (isGiantInit) {
+                        if (j > 0) evaluator->rotate_vector(giant_acc, j * m1, galois_keys, giant_acc);
+
+                        if (!isResultInitialized) { cipherResult = giant_acc; isResultInitialized = true; } 
+                        else {
+                            evaluator->mod_switch_to_inplace(cipherResult, giant_acc.parms_id());
+                            cipherResult.scale() = giant_acc.scale();
+                            evaluator->add_inplace(cipherResult, giant_acc);
+                        }
                     }
                 }
 
@@ -497,6 +554,8 @@ private:
 /// <param name="argv">실행 명령어와 인자들을 담고 있는 문자열 배열입니다.</param>
 /// <returns>정상 종료 시 0을 반환합니다.</returns>
 int main(int argc, char* argv[]) {
+    omp_set_num_threads(4);
+    
     try {
         vector<int> targetIds;
 
