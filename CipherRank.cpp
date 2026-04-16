@@ -40,16 +40,12 @@ struct Edge {
 };
 
 /// <summary>
-/// 동형암호 PIR 연산을 위해 캐싱된 대각선 평문 데이터를 표현하는 구조체입니다.
+/// 비대칭 BSGS(Baby-Step Giant-Step) 연산을 위해 사전 연산 및 캐싱된 대각선 평문 데이터를 표현하는 구조체입니다.
 /// </summary>
-struct PirDiag {
-    /// <summary>대각선 시프트 인덱스입니다.</summary>
-    int d;
-    
-    /// <summary>인코딩된 대각선 평문 데이터입니다.</summary>
-    Plaintext plain;
-};
-
+/// <remarks>
+/// Phase 1에서 역방향 시프트(Reverse Shift)가 적용된 상태로 인코딩되며, 
+/// Phase 3 및 Phase 5의 Giant-Step 연산 시 Baby-Step 암호문과의 동형 곱셈에 매핑 데이터로 사용됩니다.
+/// </remarks>
 struct BsgsDiag { 
     /// <summary>Baby-Step 인덱스입니다 (0 ~ m1-1).</summary>
     int i; 
@@ -166,8 +162,10 @@ public:
         int targetGlobalIdx = -1;
         vector<vector<double>> M_pub(nGlobal, vector<double>(nGlobal, 0.0));
         
+        BSGSParams pirParams = FindOptimalAsymmetricBSGS(nGlobal, 1.0);
+
         // Phase 1
-        vector<PirDiag> pirDiagonals = PreparePublicData(M_pub);
+        vector<BsgsDiag> pirDiagonals = PreparePublicData(M_pub, pirParams.m1, pirParams.m2);
         if (num_targets == 0) {
             cout << "[INFO] No valid target wallets found. Terminating pipeline." << endl;
             return;
@@ -177,7 +175,7 @@ public:
         vector<Ciphertext> cipherTarget = EncryptTargets();
         
         // Phase 3
-        vector<Ciphertext> cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals);
+        vector<Ciphertext> cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals, pirParams.m1, pirParams.m2);
         
         // Phase 4
         vector<vector<int>> allTopNodesIndices;
@@ -227,7 +225,7 @@ private:
     /// </summary>
     /// <param name="outM_pub">Time-decay가 적용된 글로벌 퍼블릭 매트릭스가 반환됩니다.</param>
     /// <returns>PIR 연산을 위해 1-Hop, 2-Hop이 모두 포함되어 대각선 패킹된 평문 리스트입니다.</returns>
-    vector<PirDiag> PreparePublicData(vector<vector<double>>& outM_pub) {
+    vector<BsgsDiag> PreparePublicData(vector<vector<double>>& outM_pub, int m1, int m2) {
         cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation" << endl;
 
         string snapFilePath = "../soc-sign-bitcoinotc.csv";
@@ -305,21 +303,28 @@ private:
             }
         }
 
-        vector<PirDiag> pirDiagonals;
-        for (int d = 0; d < nGlobal; d++) {
-            vector<double> diag(slot_count, 0.0);
-            bool isZero = true;
-            for (size_t c = 0; c < batch_size; c++) {
-                for (int row = 0; row < nGlobal; row++) {
-                    double val = M_total[row][(row + d) % nGlobal];
-                    diag[c * pirBlockSize + row] = val;
-                    if (val > 0) isZero = false;
+        vector<BsgsDiag> pirDiagonals;
+        for (int j = 0; j < m2; j++) {
+            for (int i = 0; i < m1; i++) {
+                int d = j * m1 + i;
+                if (d >= nGlobal) continue;
+
+                vector<double> diag(slot_count, 0.0);
+                bool isZero = true;
+                for (size_t c = 0; c < batch_size; c++) {
+                    for (int row = 0; row < nGlobal; row++) {
+                        int orig_row = ((row - j * m1) % nGlobal + nGlobal) % nGlobal;
+                        double val = M_total[orig_row][(orig_row + d) % nGlobal];
+                        
+                        diag[c * pirBlockSize + row] = val;
+                        if (val > 0) isZero = false;
+                    }
                 }
-            }
-            if (!isZero) {
-                Plaintext plainDiag;
-                encoder->encode(diag, scale, plainDiag);
-                pirDiagonals.push_back({d, plainDiag});
+                if (!isZero) {
+                    Plaintext plainDiag;
+                    encoder->encode(diag, scale, plainDiag);
+                    pirDiagonals.push_back({i, j, plainDiag});
+                }
             }
         }
         return pirDiagonals;
@@ -357,7 +362,7 @@ private:
     /// <param name="cipherChunks">클라이언트로부터 수신한 병렬 타겟 지갑들의 암호문 배열(Chunking 적용)입니다.</param>
     /// <param name="pirDiagonals">사전 연산되어 캐싱된 퍼블릭 매트릭스의 대각선 평문 리스트입니다.</param>
     /// <returns>각 청크별로 동형 추출된 이웃 가중치가 담긴 암호문 배열입니다.</returns>
-    vector<Ciphertext> ExtractBlindSubgraph(const vector<Ciphertext>& cipherChunks, const vector<PirDiag>& pirDiagonals) {
+    vector<Ciphertext> ExtractBlindSubgraph(const vector<Ciphertext>& cipherChunks, const vector<BsgsDiag>& pirDiagonals, int m1, int m2) {
         cout << "\n[Phase 3] Server: Parallel Blind Subgraph Extraction" << endl;
         vector<Ciphertext> neighborsChunks(num_chunks);
 
@@ -365,25 +370,50 @@ private:
         for (int k = 0; k < num_chunks; k++) {
             Evaluator thread_evaluator(*context);
 
+            vector<Ciphertext> baby_steps(m1);
+            baby_steps[0] = cipherChunks[k];
+            for (int i = 1; i < m1; i++) {
+                thread_evaluator.rotate_vector(cipherChunks[k], i, galois_keys, baby_steps[i]);
+            }
+
             Ciphertext cipherNeighbors; 
             bool isInit = false;
 
-            for (const auto& item : pirDiagonals) {
-                Ciphertext rotated; 
+            for (int j = 0; j < m2; j++) {
+                Ciphertext giant_acc; 
+                bool isGiantInit = false;
 
-                thread_evaluator.rotate_vector(cipherChunks[k], item.d, galois_keys, rotated);
-                thread_evaluator.multiply_plain_inplace(rotated, item.plain); 
-                thread_evaluator.rescale_to_next_inplace(rotated);
-                rotated.scale() = scale;
+                for (const auto& item : pirDiagonals) {
+                    if (item.j != j) continue;
+                    
+                    Ciphertext multiplied = baby_steps[item.i]; 
+                    thread_evaluator.multiply_plain_inplace(multiplied, item.plain);
+                    thread_evaluator.rescale_to_next_inplace(multiplied);
+                    multiplied.scale() = scale;
 
-                if (!isInit) { 
-                    cipherNeighbors = rotated; 
-                    isInit = true; 
-                } else {
-                    thread_evaluator.mod_switch_to_inplace(cipherNeighbors, rotated.parms_id());
-                    cipherNeighbors.scale() = rotated.scale();
+                    if (!isGiantInit) { 
+                        giant_acc = multiplied; 
+                        isGiantInit = true; 
+                    } else {
+                        thread_evaluator.mod_switch_to_inplace(giant_acc, multiplied.parms_id());
+                        giant_acc.scale() = multiplied.scale();
+                        thread_evaluator.add_inplace(giant_acc, multiplied);
+                    }
+                }
 
-                    thread_evaluator.add_inplace(cipherNeighbors, rotated); 
+                if (isGiantInit) {
+                    if (j > 0) {
+                        thread_evaluator.rotate_vector_inplace(giant_acc, j * m1, galois_keys);
+                    }
+
+                    if (!isInit) { 
+                        cipherNeighbors = giant_acc; 
+                        isInit = true; 
+                    } else {
+                        thread_evaluator.mod_switch_to_inplace(cipherNeighbors, giant_acc.parms_id());
+                        cipherNeighbors.scale() = giant_acc.scale();
+                        thread_evaluator.add_inplace(cipherNeighbors, giant_acc);
+                    }
                 }
             }
             neighborsChunks[k] = cipherNeighbors;
