@@ -58,13 +58,15 @@ private:
     vector<int> validWalletIds;
     vector<int> targetGlobalIndices;
 
-    const int nGlobal = 256;
-    const int pirInnerDim = nGlobal;
-    const int pirBlockSize = 2 * pirInnerDim;
+    int nGlobal;
+    int pirInnerDim = nGlobal;
+    int pirBlockSize = 2 * pirInnerDim;
 
-    const int nSub = 64;
-    const int prInnerDim = nSub;
-    const int prBlockSize = 2 * prInnerDim;  
+    int nSub;
+    int prInnerDim = nSub;
+    int prBlockSize = 2 * prInnerDim;  
+
+    size_t poly_modulus_degree;
 
     shared_ptr<SEALContext> context;
     unique_ptr<CKKSEncoder> encoder;
@@ -84,7 +86,17 @@ public:
     /// 병렬 처리할 타겟 지갑들의 ID 목록을 받아 파이프라인 인스턴스를 초기화합니다.
     /// </summary>
     /// <param name="walletIds">신용도를 검증할 타겟 지갑 ID들의 배열입니다.</param>
-    UltimatePrivacyPipeline(const vector<int>& walletIds) {
+    UltimatePrivacyPipeline(const vector<int>& walletIds, int n_global, int n_sub, size_t poly_degree) {
+        nGlobal = n_global;
+        pirInnerDim = nGlobal;
+        pirBlockSize = 2 * pirInnerDim;
+
+        nSub = n_sub;
+        prInnerDim = nSub;
+        prBlockSize = 2 * prInnerDim;
+
+        poly_modulus_degree = poly_degree;
+
         unordered_set<int> seen;
         for (int id : walletIds) {
             if (seen.insert(id).second) {
@@ -156,7 +168,7 @@ private:
     /// </summary>
     void InitializeFHE() {
         EncryptionParameters parms(scheme_type::ckks);
-        size_t poly_modulus_degree = 8192;
+
         parms.set_poly_modulus_degree(poly_modulus_degree);
         parms.set_coeff_modulus(CoeffModulus::Create(poly_modulus_degree, { 60, 45, 45, 60 }));
 
@@ -558,18 +570,45 @@ int main(int argc, char* argv[]) {
     try {
         vector<int> targetIds;
 
-        if (argc > 1) {
-            for (int i = 1; i < argc; i++) targetIds.push_back(stoi(argv[i]));
-        } else {
+int req_nGlobal = 256; 
+        int req_nSub = 64;
+
+        for (int i = 1; i < argc; i++) {
+            string arg = argv[i];
+            if (arg == "-g" && i + 1 < argc) {
+                req_nGlobal = stoi(argv[++i]);
+            } else if (arg == "-s" && i + 1 < argc) {
+                req_nSub = stoi(argv[++i]);
+            } else {
+                targetIds.push_back(stoi(arg));
+            }
+        }
+
+        if (targetIds.empty()) {
             targetIds = {1, 2, 4, 35};
         }
 
+        // 타겟 1개를 안전하게 담고 회전시키기 위한 최소 칸 수는 nGlobal * 2
+        int min_required_slots = req_nGlobal * 2;
+        
+        // CKKS 보안 강도를 유지하기 위한 최소 시작 사이즈 (슬롯 4096개)
+        size_t poly_degree = 8192; 
+        
+        // 입력된 nGlobal이 너무 크다면, poly_degree를 2배씩 늘려서 자동으로 맞춤
+        while ((poly_degree / 2) < min_required_slots) {
+            poly_degree *= 2;
+        }
+
         cout << "========================================================" << endl;
-        cout << " [Init] Multi-Target SIMD Pipeline Started " << endl;
+        cout << " [Init] Multi-Target SIMD Pipeline Auto-Configuration " << endl;
+        cout << "  -> Requested nGlobal : " << req_nGlobal << endl;
+        cout << "  -> Requested nSub    : " << req_nSub << endl;
+        cout << "  -> Auto-tuned Poly   : " << poly_degree << " (Slots: " << (poly_degree/2) << ")" << endl;
         cout << "========================================================" << endl;
 
-        UltimatePrivacyPipeline pipeline(targetIds);
+        UltimatePrivacyPipeline pipeline(targetIds, req_nGlobal, req_nSub, poly_degree);
         pipeline.RunPipeline();
+        
     } catch (const exception& e) {
         cerr << "Error occurred: " << e.what() << endl;
         return 1;
