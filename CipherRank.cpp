@@ -381,8 +381,16 @@ private:
 
             for (size_t c = 0; c < (end_idx - start_idx); c++) {
                 vector<Score> scores;
-                for (int i = 0; i < nGlobal; i++) scores.push_back({i, decodedNeighbors[c * pirBlockSize + i]});
-                sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) { return a.score > b.score; });
+                for (int i = 0; i < nGlobal; i++) {
+                    double val = decodedNeighbors[c * pirBlockSize + i];
+                    val = round(val * 100000.0) / 100000.0;
+                    scores.push_back({i, val});
+                }
+                
+                sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) { 
+                    if (abs(a.score - b.score) < 1e-6) return a.index < b.index;
+                    return a.score > b.score; 
+                });
 
                 vector<int> top64;
                 for (int i = 0; i < nSub; i++) top64.push_back(scores[i].index);
