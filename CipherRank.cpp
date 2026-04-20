@@ -118,11 +118,11 @@ private:
     vector<int> validWalletIds;
     vector<int> targetGlobalIndices;
 
-    const int nGlobal = 1024;
+    const int nGlobal = 256;
     const int pirInnerDim = nGlobal;
     const int pirBlockSize = 2 * pirInnerDim;
 
-    const int nSub = 256;
+    const int nSub = 64;
     const int prInnerDim = nSub;
     const int prBlockSize = 2 * prInnerDim;  
 
@@ -218,7 +218,7 @@ private:
     /// </summary>
     void InitializeFHE() {
         EncryptionParameters parms(scheme_type::ckks);
-        size_t poly_modulus_degree = 16384;
+        size_t poly_modulus_degree = 8192;
         parms.set_poly_modulus_degree(poly_modulus_degree);
         parms.set_coeff_modulus(CoeffModulus::Create(poly_modulus_degree, { 60, 45, 45, 60 }));
 
@@ -338,7 +338,7 @@ private:
                 vector<double> diag(slot_count, 0.0);
                 bool isZero = true;
                 for (size_t c = 0; c < batch_size; c++) {
-                    for (int row = 0; row < nGlobal; row++) {
+                    for (int row = 0; row < nGlobal * 2; row++) {
                         int orig_row = ((row - j * m1) % nGlobal + nGlobal) % nGlobal;
                         double val = M_total[orig_row][(orig_row + d) % nGlobal];
                         
