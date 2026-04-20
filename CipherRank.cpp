@@ -97,31 +97,57 @@ public:
     /// 전체 시빌 방어 파이프라인을 순차적으로 실행하는 메인 엔트리 API입니다.
     /// </summary>
     void RunPipeline() {
+        auto total_start = chrono::high_resolution_clock::now();
+
+        auto start_time = chrono::high_resolution_clock::now();
         InitializeFHE();
+        auto end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Initialize FHE : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
 
         int targetGlobalIdx = -1;
         vector<vector<double>> M_pub(nGlobal, vector<double>(nGlobal, 0.0));
         
         // Phase 1
+        start_time = chrono::high_resolution_clock::now();
         vector<PirDiag> pirDiagonals = PreparePublicData(M_pub);
+        end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Phase 1 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
+
         if (num_targets == 0) {
             cout << "[INFO] No valid target wallets found. Terminating pipeline." << endl;
             return;
         }
         
         // Phase 2
+        start_time = chrono::high_resolution_clock::now();
         vector<Ciphertext> cipherTarget = EncryptTargets();
+        end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Phase 2 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
         
         // Phase 3
+        start_time = chrono::high_resolution_clock::now();
         vector<Ciphertext> cipherNeighbors = ExtractBlindSubgraph(cipherTarget, pirDiagonals);
+        end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Phase 3 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
         
         // Phase 4
+        start_time = chrono::high_resolution_clock::now();
         vector<vector<int>> allTop64Indices;
         vector<int> allTargetSubIdx;
         ResolveSubgraphIndices(cipherNeighbors, allTop64Indices, allTargetSubIdx);
+        end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Phase 4 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
         
         // Phase 5 & 6
+        start_time = chrono::high_resolution_clock::now();
         EvaluatePageRank(allTop64Indices, M_pub, allTargetSubIdx);
+        end_time = chrono::high_resolution_clock::now();
+        cout << "[Timer] Phase 5 & 6 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
+
+        auto total_end = chrono::high_resolution_clock::now();
+        cout << "\n========================================================" << endl;
+        cout << "[Total Timer] Total Pipeline Completed : " << chrono::duration<double>(total_end - total_start).count() << " sec" << endl;
+        cout << "========================================================" << endl;
     }
 
 private:
