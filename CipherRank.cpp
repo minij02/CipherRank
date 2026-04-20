@@ -360,7 +360,7 @@ private:
                 vector<Score> scores;
                 for (int i = 0; i < nGlobal; i++) {
                     double val = decodedNeighbors[c * pirBlockSize + i];
-                    if (abs(val) < 1e-5) val = 0.0;
+                    val = round(val * 100000.0) / 100000.0;
                     scores.push_back({i, val});
                 }
 
