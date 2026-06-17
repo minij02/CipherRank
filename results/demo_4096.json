@@ -1,0 +1,161 @@
+{
+  "meta": {
+    "reps": 1
+  },
+  "cells": [
+    {
+      "mode": "A1",
+      "n_global": 4096,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 26.5316,
+        "Phase 1": 21.8646,
+        "Phase 2": 0.0805827,
+        "Phase 3": 14.8462,
+        "Phase 4": 0.0516012,
+        "Phase 5 & 6": 15.833777,
+        "total": 79.218859
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.018625,
+        "2": 0.010772,
+        "4": 0.008882,
+        "35": 0.049194,
+        "25": 0.050181,
+        "7": 0.024539,
+        "88": 0.002046,
+        "100": 0.000978,
+        "200": 0.003186
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B",
+      "n_global": 4096,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.903296,
+        "Phase 1": 6.85811,
+        "Phase 2": 0.0875824,
+        "Phase 3": 13.2771,
+        "Phase 4": 0.0481925,
+        "Phase 5 & 6": 15.790432,
+        "total": 36.964934
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.023535,
+        "2": 0.010772,
+        "4": 0.011008,
+        "35": 0.056996,
+        "25": 0.050181,
+        "7": 0.048107,
+        "88": 0.002046,
+        "100": 0.000978,
+        "200": 0.003187
+      },
+      "out_of_range": [],
+      "returncode": 0
+    }
+  ]
+}
