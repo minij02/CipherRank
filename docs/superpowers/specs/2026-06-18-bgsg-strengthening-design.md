@@ -426,7 +426,70 @@ v1의 "학술적 기여" 주장은 prior art (Halevi-Shoup BSGS, Han-Hhan FHE be
 
 ---
 
-## 부록 B — v1 → v2 변경 이력
+## 부록 B — R1 ε-Equivalence 사전 실측 (v2 검증)
+
+H_noise (sec 3.2) 가설을 **데이터로 대체**하기 위해 main vs `feat/bgsg-experiment + H-2 patch` 의 Phase 6 FHE Engine Score를 동일 입력에 대해 비교한 사전 실측 결과.
+
+### 실험 환경
+- 머신: Darwin 25.5.0, OMP threads = 4, CPU governor 미고정 (사전 실측)
+- 컴파일러: AppleClang (CMake default), SEAL 4.1.2, coeff_modulus `{60,45,45,60}`, scale = 2⁴⁵
+- 데이터셋: `soc-sign-bitcoinotc.csv` (정렬 검증은 sec 6.5에 따라 추후 sweep에서)
+
+### Config A — Single-chunk (`-g 256 -s 64`, 5 targets, 1 chunk)
+
+| Wallet | main FHE Score | bgsg FHE Score | abs diff |
+|---:|---:|---:|---:|
+| 1  | 0.037138 | 0.037138 | 0 |
+| 2  | 0.014749 | 0.014749 | 0 |
+| 4  | 0.014618 | 0.014618 | 0 |
+| 35 | 0.020566 | 0.020566 | 0 |
+| 25 | 0.082403 | 0.082403 | 0 |
+
+**Result: `max|Δ| ≤ 5×10⁻⁷`** (display precision floor). R3 verdict 일치.
+
+### Config B — Multi-chunk (`-g 1024 -s 256`, 9 targets, 5 chunks)
+
+batch_size = 2 (slot_count 4096 / pirBlockSize 2048). 9 targets → 5 chunks → **C4 lemma "Homomorphic Pattern Invariance under Chunk-Translation" 실측 검증**.
+
+| Wallet | main FHE Score | bgsg FHE Score | abs diff |
+|---:|---:|---:|---:|
+| 1   | 0.022786 | 0.022786 | 0 |
+| 2   | 0.007078 | 0.007078 | 0 |
+| 4   | 0.006627 | 0.006627 | 0 |
+| 7   | 0.022980 | 0.022980 | 0 |
+| 25  | 0.050181 | 0.050181 | 0 |
+| 35  | 0.028612 | 0.028612 | 0 |
+| 88  | 0.001733 | 0.001733 | 0 |
+| 100 | 0.000816 | 0.000816 | 0 |
+| 200 | 0.000878 | 0.000878 | 0 |
+
+**Result: `max|Δ| ≤ 5×10⁻⁷`**. **C4 lemma 실측 보존**. R3 verdict 일치.
+
+### Phase별 wall-clock 관찰 (Config B)
+
+| Phase | main (sec) | bgsg (sec) | 비율 (main/bgsg) |
+|---|---:|---:|---:|
+| InitializeFHE | 0.09 | 3.28 | **0.03×** (회귀: galois key O(N) 비용 — H-4 표 확인) |
+| Phase 1 | 7.73 | 2.58 | 3.0× (Phase 1 cache 효과로 추정, A1 무관) |
+| Phase 3 | **21.55** | **0.96** | **22.4×** (예측 √N/2 ≈ 16 보다 큼 — OMP+BSGS 결합) |
+| Phase 5+6 | 48.90 | 4.24 | 11.5× (P5 ITERATIONS=10 BSGS+OMP) |
+| **Total** | **78.30** | **11.09** | **7.1×** |
+
+### 가설 H_noise 결론
+- **검증된 부분:** bgsg와 baseline의 Phase 6 출력 ε-equivalence가 multi-chunk 시나리오 포함 display precision 한계 내 성립. H_noise 의 "동등" 부분은 **약한 형식으로 데이터 지지**.
+- **남은 의문:** 측정이 display precision (6 decimals) 한계에서 0으로 보이는 것이지, raw noise floor 수준 (~10⁻¹¹) 비교는 아직 수행 안 됨. 정확한 ε bound는 sec 6의 정식 sweep에서 raw double precision으로 산출 (Phase 6 출력에 `setprecision(15)` 적용 + per-slot decoded vector 비교 인프라 필요).
+- **anomaly 없음:** R1 위반 케이스가 사전 실측에서 발견되지 않음. 따라서 sec 3.2의 N1-N4 노이즈 분석이 데이터와 일관됨.
+
+### 부수 발견 (sec 6 sweep 진입 전 메모)
+
+- **F1.** Phase 3 22.4× speedup은 BSGS-only 예측을 초과 — OMP 5-chunk × 4-thread 의 효과 분리 필요 (sec 6.2 fine sweep의 OMP 축이 핵심).
+- **F2.** InitializeFHE 36× **회귀** 가 확인됨 → H-4 표의 1024 nGlobal 행 (~512MB galois keys) 과 일관. P1 적용의 ROI를 가장 강하게 정당화.
+- **F3.** Phase 5+6 11.5× speedup이 Phase 3 (22.4×) 보다 작음 — sec 2.2 cost model이 예측한 decrypt/re-encrypt 오버헤드 영향 일관.
+- **F4.** Total speedup 7.1× < Phase 3 speedup 22.4× — Phase 1 (Phase 1 자체는 A1 변경 무관) 와 Init 오버헤드가 amortize 효과 희석. sec 8 O6 (Phase 1이 dominant 가능성) 의 정확한 동기.
+
+---
+
+## 부록 C — v1 → v2 변경 이력
 
 | v1 위치 | 변경 |
 |---|---|
