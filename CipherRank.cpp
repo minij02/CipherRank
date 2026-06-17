@@ -124,9 +124,21 @@ private:
 
     int nSub;
     int prInnerDim = nSub;
-    int prBlockSize = 2 * prInnerDim;  
+    int prBlockSize = 2 * prInnerDim;
 
     size_t poly_modulus_degree;
+
+    // B1 (minimal): RunConfig 값. main() 에서 setter 로 주입.
+    double beta1_ = 1.0;
+    double beta2_ = 0.30;
+    double prune_threshold_ = 0.05;
+
+public:
+    void SetConfig(double b1, double b2, double thr) {
+        beta1_ = b1; beta2_ = b2; prune_threshold_ = thr;
+    }
+
+private:
 
     shared_ptr<SEALContext> context;
     unique_ptr<CKKSEncoder> encoder;
@@ -183,11 +195,22 @@ public:
         
         BSGSParams pirParams = FindOptimalAsymmetricBSGS(nGlobal, 1.0);
 
-        // Phase 1
+        // Phase 1 (B: sparse + Q7 padding, β·thr injected)
         start_time = chrono::high_resolution_clock::now();
-        vector<BsgsDiag> pirDiagonals = PreparePublicData(M_pub, pirParams.m1, pirParams.m2);
+        int D_sparse = 0;
+        vector<BsgsDiag> pirDiagonals = PreparePublicData(M_pub, pirParams.m1, pirParams.m2,
+                                                         beta1_, beta2_, prune_threshold_,
+                                                         D_sparse);
         end_time = chrono::high_resolution_clock::now();
         cout << "[Timer] Phase 1 Completed : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
+
+        // B8 (spec sec 5.10): D_sparse < 2*sqrt(N) 시 BSGS 비용 (m1+m2-2) 가 직접 rotation 비용 D 보다 큼.
+        // 현 구현은 detection + 로그만; main-style 분기는 별도 작업.
+        int D_threshold = static_cast<int>(2 * sqrt(static_cast<double>(nGlobal)));
+        if (D_sparse > 0 && D_sparse < D_threshold) {
+            cout << "   [B8] D_sparse=" << D_sparse << " < " << D_threshold
+                 << " — BSGS rotation count exceeds direct rotation count (informational)." << endl;
+        }
 
         if (num_targets == 0) {
             cout << "[INFO] No valid target wallets found. Terminating pipeline." << endl;
@@ -259,13 +282,24 @@ private:
     }
 
     /// <summary>
-    /// 로컬 트랜잭션 데이터를 로드하고, 먼지 트랜잭션을 가지치기하여
-    /// 글로벌 퍼블릭 매트릭스(<paramref name="outM_pub"/>)와 블라인드 탐색용 대각선 캐싱 데이터를 생성합니다.
+    /// 로컬 트랜잭션 데이터를 로드하여 글로벌 퍼블릭 매트릭스를 구성하고,
+    /// sparse 인접 리스트 기반 β-weighted 2-hop 누적 + Q7 padding 으로 BsgsDiag 를 생성합니다.
+    /// (Stage B: A1 BSGS 인코딩 + A2 sparse 알고리즘 + Q7 padding bridge 통합)
     /// </summary>
-    /// <param name="outM_pub">Time-decay가 적용된 글로벌 퍼블릭 매트릭스가 반환됩니다.</param>
-    /// <returns>PIR 연산을 위해 1-Hop, 2-Hop이 모두 포함되어 대각선 패킹된 평문 리스트입니다.</returns>
-    vector<BsgsDiag> PreparePublicData(vector<vector<double>>& outM_pub, int m1, int m2) {
-        cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation" << endl;
+    /// <param name="outM_pub">Time-decay 가 적용된 1-Hop 매트릭스 (Phase 5 에서 사용).</param>
+    /// <param name="m1">BSGS baby step 크기.</param>
+    /// <param name="m2">BSGS giant step 크기.</param>
+    /// <param name="beta1">1-hop 가중치 (default 1.0).</param>
+    /// <param name="beta2">2-hop 가중치 (default 0.30, A2 semantic).</param>
+    /// <param name="prune_threshold">2-hop 전파 차단 임계값 (default 0.05).</param>
+    /// <param name="D_sparse_out">비영 BsgsDiag 갯수 (B2 cost function 입력).</param>
+    /// <returns>BsgsDiag (i, j, plain) 리스트. Q7 padding 으로 row ∈ [0, 2N) 채움.</returns>
+    vector<BsgsDiag> PreparePublicData(vector<vector<double>>& outM_pub, int m1, int m2,
+                                       double beta1, double beta2, double prune_threshold,
+                                       int& D_sparse_out) {
+        cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation (sparse + Q7 padding)" << endl;
+        cout << "   [B-config] beta1=" << beta1 << ", beta2=" << beta2
+             << ", prune_threshold=" << prune_threshold << endl;
 
         string snapFilePath = "../soc-sign-bitcoinotc.csv";
         ifstream file(snapFilePath);
@@ -319,53 +353,63 @@ private:
         batch_size = min(pirCapacity, prCapacity);
         num_chunks = ceil(static_cast<double>(num_targets) / batch_size);
 
+        // 1-hop: outM_pub (Phase 5 용 dense) + outAdj (sparse 알고리즘 용 인접 리스트)
+        vector<vector<pair<int, double>>> outAdj(nGlobal);
         double HALF_LIFE = 365.0 * 24.0 * 60.0 * 60.0;
         for (const auto& edge : rawEdges) {
             if (globalNodeToIndex.count(edge.src) && globalNodeToIndex.count(edge.tgt)) {
+                int srcIdx = globalNodeToIndex[edge.src];
+                int tgtIdx = globalNodeToIndex[edge.tgt];
                 double decay = pow(0.5, (maxTime - edge.time) / HALF_LIFE);
-                outM_pub[globalNodeToIndex[edge.tgt]][globalNodeToIndex[edge.src]] += (edge.weight * decay);
+                double w = edge.weight * decay;
+                outM_pub[tgtIdx][srcIdx] += w;
+                outAdj[srcIdx].push_back({tgtIdx, w});
             }
         }
 
-        vector<vector<double>> M_total(nGlobal, vector<double>(nGlobal, 0.0));
-        for (int i = 0; i < nGlobal; i++) {
-            for (int k = 0; k < nGlobal; k++) { 
-                double outM_ik = outM_pub[i][k];
-                if (outM_ik == 0.0) continue;
-                for (int j = 0; j < nGlobal; j++) {
-                    M_total[i][j] += outM_ik * outM_pub[k][j];
+        // A2 sparse 알고리즘: O(N^3) dense matmul 대체. 1-hop + β2-weighted 2-hop, pruning.
+        // 결과: sparseDiag[d][row] = M_total[row][(row+d) % N] 와 등가 (β1=β2=1, threshold=0 일 때)
+        vector<unordered_map<int, double>> sparseDiag(nGlobal);
+        for (int src = 0; src < nGlobal; src++) {
+            for (const auto& [mid, w1] : outAdj[src]) {
+                int d1 = (src - mid + nGlobal) % nGlobal;
+                sparseDiag[d1][mid] += beta1 * w1;
+
+                if (w1 < prune_threshold) continue;
+
+                for (const auto& [dst, w2] : outAdj[mid]) {
+                    int d2 = (src - dst + nGlobal) % nGlobal;
+                    sparseDiag[d2][dst] += beta2 * w1 * w2;
                 }
             }
-
-            for (int j = 0; j < nGlobal; j++) {
-                M_total[i][j] += outM_pub[i][j];
-            }
         }
 
+        // BsgsDiag 인코딩 with Q7 padding (row ∈ [0, 2N)). sparseDiag 를 lookup 으로 사용.
         vector<BsgsDiag> pirDiagonals;
         for (int j = 0; j < m2; j++) {
             for (int i = 0; i < m1; i++) {
                 int d = j * m1 + i;
                 if (d >= nGlobal) continue;
+                if (sparseDiag[d].empty()) continue;
 
                 vector<double> diag(slot_count, 0.0);
-                bool isZero = true;
                 for (size_t c = 0; c < batch_size; c++) {
                     for (int row = 0; row < nGlobal * 2; row++) {
                         int orig_row = ((row - j * m1) % nGlobal + nGlobal) % nGlobal;
-                        double val = M_total[orig_row][(orig_row + d) % nGlobal];
-                        
-                        diag[c * pirBlockSize + row] = val;
-                        if (val > 0) isZero = false;
+                        auto it = sparseDiag[d].find(orig_row);
+                        if (it != sparseDiag[d].end()) {
+                            diag[c * pirBlockSize + row] = it->second;
+                        }
                     }
                 }
-                if (!isZero) {
-                    Plaintext plainDiag;
-                    encoder->encode(diag, scale, plainDiag);
-                    pirDiagonals.push_back({i, j, plainDiag});
-                }
+                Plaintext plainDiag;
+                encoder->encode(diag, scale, plainDiag);
+                pirDiagonals.push_back({i, j, plainDiag});
             }
         }
+        D_sparse_out = static_cast<int>(pirDiagonals.size());
+        cout << "   [B-stat] D_sparse = " << D_sparse_out << " / " << nGlobal
+             << " (sparsity = " << (1.0 - static_cast<double>(D_sparse_out) / nGlobal) << ")" << endl;
         return pirDiagonals;
     }
 
@@ -724,8 +768,13 @@ int main(int argc, char* argv[]) {
     try {
         vector<int> targetIds;
 
-        int req_nGlobal = 256; 
+        int req_nGlobal = 256;
         int req_nSub = 64;
+
+        // B1 minimal: β·thr CLI flags
+        double req_beta1 = 1.0;
+        double req_beta2 = 0.30;
+        double req_thr = 0.05;
 
         for (int i = 1; i < argc; i++) {
             string arg = argv[i];
@@ -733,6 +782,12 @@ int main(int argc, char* argv[]) {
                 req_nGlobal = stoi(argv[++i]);
             } else if (arg == "-s" && i + 1 < argc) {
                 req_nSub = stoi(argv[++i]);
+            } else if (arg == "-b1" && i + 1 < argc) {
+                req_beta1 = stod(argv[++i]);
+            } else if (arg == "-b2" && i + 1 < argc) {
+                req_beta2 = stod(argv[++i]);
+            } else if (arg == "-thr" && i + 1 < argc) {
+                req_thr = stod(argv[++i]);
             } else {
                 targetIds.push_back(stoi(arg));
             }
@@ -758,9 +813,12 @@ int main(int argc, char* argv[]) {
         cout << "  -> Requested nGlobal : " << req_nGlobal << endl;
         cout << "  -> Requested nSub    : " << req_nSub << endl;
         cout << "  -> Auto-tuned Poly   : " << poly_degree << " (Slots: " << (poly_degree/2) << ")" << endl;
+        cout << "  -> [B-config] beta1=" << req_beta1 << ", beta2=" << req_beta2
+             << ", thr=" << req_thr << endl;
         cout << "========================================================" << endl;
 
         UltimatePrivacyPipeline pipeline(targetIds, req_nGlobal, req_nSub, poly_degree);
+        pipeline.SetConfig(req_beta1, req_beta2, req_thr);
         pipeline.RunPipeline();
         
     } catch (const exception& e) {
