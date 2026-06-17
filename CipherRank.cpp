@@ -134,6 +134,8 @@ private:
     unique_ptr<Evaluator> evaluator;
     unique_ptr<Decryptor> decryptor;
     GaloisKeys galois_keys;
+    PublicKey public_key;
+    SecretKey secret_key;
     
     size_t slot_count;
     double scale;
@@ -236,10 +238,9 @@ private:
 
         context = make_shared<SEALContext>(parms);
         KeyGenerator keygen(*context);
-        
-        PublicKey public_key;
+
         keygen.create_public_key(public_key);
-        SecretKey secret_key = keygen.secret_key();
+        secret_key = keygen.secret_key();
 
         vector<int> galois_steps;
         for (int i = 1; i <= nGlobal; i++) galois_steps.push_back(i);
@@ -581,6 +582,13 @@ private:
         // FHE 병렬 PageRank 계산 (Chunk 단위 처리)
         #pragma omp parallel for
         for (int k = 0; k < num_chunks; k++) {
+            // P5a: thread-local SEAL 객체. Phase 3와 일관된 격리 패턴.
+            // galois_keys/public_key/secret_key 는 const read이므로 공유 안전.
+            Evaluator   thr_eval(*context);
+            Encryptor   thr_enc(*context, public_key);
+            Decryptor   thr_dec(*context, secret_key);
+            CKKSEncoder thr_encoder(*context);
+
             int start_idx = k * batch_size;
             int end_idx = min(static_cast<int>(num_targets), start_idx + batch_size);
             int current_batch = end_idx - start_idx;
@@ -604,7 +612,7 @@ private:
                         }
                     }
                     if (!isZero) {
-                        Plaintext plainDiag; encoder->encode(diag, scale, plainDiag);
+                        Plaintext plainDiag; thr_encoder.encode(diag, scale, plainDiag);
                         bsgs_diagonals.push_back({i, j, plainDiag});
                     }
                 }
@@ -620,14 +628,14 @@ private:
                 }
 
                 Plaintext plainVEnc;
-                encoder->encode(vRepeated, scale, plainVEnc);
+                thr_encoder.encode(vRepeated, scale, plainVEnc);
                 Ciphertext cipherV;
-                encryptor->encrypt(plainVEnc, cipherV);
+                thr_enc.encrypt(plainVEnc, cipherV);
 
                 vector<Ciphertext> baby_steps(m1);
                 baby_steps[0] = cipherV;
                 for (int i = 1; i < m1; i++) {
-                    evaluator->rotate_vector(cipherV, i, galois_keys, baby_steps[i]);
+                    thr_eval.rotate_vector(cipherV, i, galois_keys, baby_steps[i]);
                 }
 
                 Ciphertext cipherResult;
@@ -639,33 +647,33 @@ private:
                     for (const auto& item : bsgs_diagonals) {
                         if (item.j != j) continue;
                         Ciphertext multiplied;
-                        evaluator->multiply_plain(baby_steps[item.i], item.plain, multiplied);
-                        evaluator->rescale_to_next_inplace(multiplied); multiplied.scale() = scale;
+                        thr_eval.multiply_plain(baby_steps[item.i], item.plain, multiplied);
+                        thr_eval.rescale_to_next_inplace(multiplied); multiplied.scale() = scale;
 
                         if (!isGiantInit) { giant_acc = multiplied; isGiantInit = true; }
                         else {
-                            evaluator->mod_switch_to_inplace(giant_acc, multiplied.parms_id());
+                            thr_eval.mod_switch_to_inplace(giant_acc, multiplied.parms_id());
                             giant_acc.scale() = multiplied.scale();
-                            evaluator->add_inplace(giant_acc, multiplied);
+                            thr_eval.add_inplace(giant_acc, multiplied);
                         }
                     }
 
                     if (isGiantInit) {
-                        if (j > 0) evaluator->rotate_vector(giant_acc, j * m1, galois_keys, giant_acc);
+                        if (j > 0) thr_eval.rotate_vector(giant_acc, j * m1, galois_keys, giant_acc);
 
-                        if (!isResultInitialized) { cipherResult = giant_acc; isResultInitialized = true; } 
+                        if (!isResultInitialized) { cipherResult = giant_acc; isResultInitialized = true; }
                         else {
-                            evaluator->mod_switch_to_inplace(cipherResult, giant_acc.parms_id());
+                            thr_eval.mod_switch_to_inplace(cipherResult, giant_acc.parms_id());
                             cipherResult.scale() = giant_acc.scale();
-                            evaluator->add_inplace(cipherResult, giant_acc);
+                            thr_eval.add_inplace(cipherResult, giant_acc);
                         }
                     }
                 }
 
                 Plaintext decrypted;
-                decryptor->decrypt(cipherResult, decrypted);
-                vector<double> decoded; 
-                encoder->decode(decrypted, decoded);
+                thr_dec.decrypt(cipherResult, decrypted);
+                vector<double> decoded;
+                thr_encoder.decode(decrypted, decoded);
 
                 for(size_t c = 0; c < current_batch; c++) {
                     double sum = 0.0;
