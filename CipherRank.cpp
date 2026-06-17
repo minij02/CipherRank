@@ -11,6 +11,8 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
+#include <map>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -21,6 +23,16 @@
 
 using namespace std;
 using namespace seal;
+
+// [Q5] M_pub 을 sparse 표현 (행 단위 hash) 으로 저장. dense N×N 대신 nnz·~48 bytes.
+// nGlobal=4096 에서 128 MB → ~150 KB. 4096 demo 의 메모리 enabler.
+using SparseMatrix = vector<unordered_map<int, double>>;
+
+inline double SparseGet(const SparseMatrix& M, int i, int j) {
+    if (i < 0 || i >= static_cast<int>(M.size())) return 0.0;
+    auto it = M[i].find(j);
+    return (it != M[i].end()) ? it->second : 0.0;
+}
 
 /// <summary>
 /// 그래프의 간선(Edge) 정보를 표현하는 구조체입니다.
@@ -82,26 +94,40 @@ BSGSParams FindOptimalAsymmetricBSGS(int N, double giant_weight = 2.0) {
     int best_m1 = 1;
     int best_m2 = N;
     double min_cost = 1e9; // 초기값 무한대
-    
+
     // m1을 1부터 N까지 늘려가며 최적의 조합을 찾음
     for (int m1 = 1; m1 <= N; m1++) {
         int m2 = (N + m1 - 1) / m1; // N을 커버하기 위한 최소 m2
-        
+
         // 비용(Cost) 함수 = (Baby Step 횟수) + 가중치 * (Giant Step 횟수)
         double cost = m1 + giant_weight * m2;
-        
+
         if (cost < min_cost) {
             min_cost = cost;
             best_m1 = m1;
             best_m2 = m2;
         }
     }
-    
+
     cout << " [Auto-Tune] N=" << N << " -> Optimal Asymmetric BSGS: "
-         << "m1(Baby)=" << best_m1 << ", m2(Giant)=" << best_m2 
+         << "m1(Baby)=" << best_m1 << ", m2(Giant)=" << best_m2
          << " (Weight: " << giant_weight << "x)" << endl;
-         
+
     return {best_m1, best_m2};
+}
+
+/// <summary>
+/// (m1, m2) 쌍에 대해 BSGS rotation 에 실제로 필요한 step set 을 계산합니다.
+/// P1 (Galois Key Slimming) 의 일부: 키 생성 비용을 O(N) → O(m1 + m2) 로 축소.
+/// </summary>
+static vector<int> ComputeBSGSStepSet(const BSGSParams& params, int N) {
+    vector<int> steps;
+    for (int i = 1; i < params.m1; i++) steps.push_back(i);          // baby steps
+    for (int j = 1; j < params.m2; j++) {                            // giant steps
+        int step = j * params.m1;
+        if (step < N) steps.push_back(step);
+    }
+    return steps;
 }
 
 /// <summary>
@@ -132,6 +158,9 @@ private:
     double beta1_ = 1.0;
     double beta2_ = 0.30;
     double prune_threshold_ = 0.05;
+
+    // P1 (Galois Key Slimming): InitializeFHE 직전에 RunPipeline 에서 채워넣음.
+    vector<int> galois_step_set_;
 
 public:
     void SetConfig(double b1, double b2, double thr) {
@@ -185,15 +214,32 @@ public:
     void RunPipeline() {
         auto total_start = chrono::high_resolution_clock::now();
 
+        // B0 (단순 형태): InitializeFHE 직전에 Phase 3 + Phase 5 의 step set 합집합을 계산.
+        // FindOptimalAsymmetricBSGS 는 순수 함수이므로 FHE 컨텍스트 없이 호출 가능.
+        // weight 측정 (auto-tune) 은 키 생성 후이므로 여기서는 default weight=1.0 사용 — 현 B-γ 범위.
+        BSGSParams pirParams = FindOptimalAsymmetricBSGS(nGlobal, 1.0);
+        BSGSParams prParams  = FindOptimalAsymmetricBSGS(nSub,    1.0);
+
+        vector<int> stepsPir = ComputeBSGSStepSet(pirParams, nGlobal);
+        vector<int> stepsPr  = ComputeBSGSStepSet(prParams,  nSub);
+
+        // Union (정렬 + 중복 제거). 측정 dummy rotation (현 코드 line 603/609) 의 {1, 16} 포함.
+        set<int> unionSet(stepsPir.begin(), stepsPir.end());
+        unionSet.insert(stepsPr.begin(), stepsPr.end());
+        unionSet.insert(1); unionSet.insert(16);
+        galois_step_set_.assign(unionSet.begin(), unionSet.end());
+
+        cout << " [P1] Galois key step set size = " << galois_step_set_.size()
+             << " (was " << nGlobal << " in pre-P1 default)" << endl;
+
         auto start_time = chrono::high_resolution_clock::now();
         InitializeFHE();
         auto end_time = chrono::high_resolution_clock::now();
         cout << "[Timer] Initialize FHE : " << chrono::duration<double>(end_time - start_time).count() << " sec" << endl;
 
         int targetGlobalIdx = -1;
-        vector<vector<double>> M_pub(nGlobal, vector<double>(nGlobal, 0.0));
-        
-        BSGSParams pirParams = FindOptimalAsymmetricBSGS(nGlobal, 1.0);
+        // [Q5] M_pub 을 sparse 로 할당. nGlobal=4096 시 dense 128MB → sparse ~150KB.
+        SparseMatrix M_pub(nGlobal);
 
         // Phase 1 (B: sparse + Q7 padding, β·thr injected)
         start_time = chrono::high_resolution_clock::now();
@@ -265,9 +311,13 @@ private:
         keygen.create_public_key(public_key);
         secret_key = keygen.secret_key();
 
-        vector<int> galois_steps;
-        for (int i = 1; i <= nGlobal; i++) galois_steps.push_back(i);
-        keygen.create_galois_keys(galois_steps, galois_keys);
+        // P1: 미리 계산된 step set (Phase 3 + Phase 5 의 BSGS step 합집합) 만 생성.
+        // 이전: {1..nGlobal} 모든 step → O(N) keys. 현재: O(m1_pir + m2_pir + m1_pr + m2_pr).
+        if (galois_step_set_.empty()) {
+            // 안전망: SetGaloisStepSet 호출 안 됐을 때 기존 동작 유지.
+            for (int i = 1; i <= nGlobal; i++) galois_step_set_.push_back(i);
+        }
+        keygen.create_galois_keys(galois_step_set_, galois_keys);
 
         encoder = make_unique<CKKSEncoder>(*context);
         encryptor = make_unique<Encryptor>(*context, public_key);
@@ -294,7 +344,7 @@ private:
     /// <param name="prune_threshold">2-hop 전파 차단 임계값 (default 0.05).</param>
     /// <param name="D_sparse_out">비영 BsgsDiag 갯수 (B2 cost function 입력).</param>
     /// <returns>BsgsDiag (i, j, plain) 리스트. Q7 padding 으로 row ∈ [0, 2N) 채움.</returns>
-    vector<BsgsDiag> PreparePublicData(vector<vector<double>>& outM_pub, int m1, int m2,
+    vector<BsgsDiag> PreparePublicData(SparseMatrix& outM_pub, int m1, int m2,
                                        double beta1, double beta2, double prune_threshold,
                                        int& D_sparse_out) {
         cout << "\n[Phase 1] Server: Public Transaction Matrix Preparation (sparse + Q7 padding)" << endl;
@@ -367,49 +417,90 @@ private:
             }
         }
 
-        // A2 sparse 알고리즘: O(N^3) dense matmul 대체. 1-hop + β2-weighted 2-hop, pruning.
-        // 결과: sparseDiag[d][row] = M_total[row][(row+d) % N] 와 등가 (β1=β2=1, threshold=0 일 때)
-        vector<unordered_map<int, double>> sparseDiag(nGlobal);
-        for (int src = 0; src < nGlobal; src++) {
-            for (const auto& [mid, w1] : outAdj[src]) {
-                int d1 = (src - mid + nGlobal) % nGlobal;
-                sparseDiag[d1][mid] += beta1 * w1;
+        // [B3] Phase 1 OMP — per-thread sparseDiag_local + 결정론적 sequential reduce.
+        // [Q4] reduce 후 per-diag entry 를 row 오름차순으로 정렬 → cross-run FP 누적 순서 결정성.
+        int num_threads = omp_get_max_threads();
+        vector<vector<unordered_map<int, double>>> tlSparseDiag(num_threads,
+            vector<unordered_map<int, double>>(nGlobal));
 
-                if (w1 < prune_threshold) continue;
+        #pragma omp parallel
+        {
+            int tid = omp_get_thread_num();
+            auto& localDiag = tlSparseDiag[tid];
+            #pragma omp for schedule(static)
+            for (int src = 0; src < nGlobal; src++) {
+                for (const auto& [mid, w1] : outAdj[src]) {
+                    int d1 = (src - mid + nGlobal) % nGlobal;
+                    localDiag[d1][mid] += beta1 * w1;
 
-                for (const auto& [dst, w2] : outAdj[mid]) {
-                    int d2 = (src - dst + nGlobal) % nGlobal;
-                    sparseDiag[d2][dst] += beta2 * w1 * w2;
+                    if (w1 < prune_threshold) continue;
+
+                    for (const auto& [dst, w2] : outAdj[mid]) {
+                        int d2 = (src - dst + nGlobal) % nGlobal;
+                        localDiag[d2][dst] += beta2 * w1 * w2;
+                    }
                 }
             }
         }
 
-        // BsgsDiag 인코딩 with Q7 padding (row ∈ [0, 2N)). sparseDiag 를 lookup 으로 사용.
+        // Reduce: thread_id 0..P-1 순서로 sequential 합산 → FP 결합 결정론.
+        // 그 후 Q4: 각 d 의 entry 를 row 오름차순 sorted vector 로 변환.
+        vector<vector<pair<int, double>>> sparseDiag(nGlobal);
+        {
+            vector<map<int, double>> merged(nGlobal);  // std::map = sorted by row
+            for (int t = 0; t < num_threads; t++) {
+                for (int d = 0; d < nGlobal; d++) {
+                    for (const auto& [row, val] : tlSparseDiag[t][d]) {
+                        merged[d][row] += val;
+                    }
+                }
+            }
+            for (int d = 0; d < nGlobal; d++) {
+                sparseDiag[d].assign(merged[d].begin(), merged[d].end());
+            }
+        }
+
+        // BsgsDiag 인코딩 with Q7 padding (row ∈ [0, 2N)). thread-local CKKSEncoder (P5a 패턴).
         vector<BsgsDiag> pirDiagonals;
-        for (int j = 0; j < m2; j++) {
-            for (int i = 0; i < m1; i++) {
+        {
+            // (j, i) → 비영 (d) 만 모아 OMP 분배.
+            vector<pair<int,int>> work;  // (j, i) 쌍 nonzero 만
+            for (int j = 0; j < m2; j++) {
+                for (int i = 0; i < m1; i++) {
+                    int d = j * m1 + i;
+                    if (d >= nGlobal) continue;
+                    if (sparseDiag[d].empty()) continue;
+                    work.push_back({j, i});
+                }
+            }
+            vector<BsgsDiag> results(work.size());
+            #pragma omp parallel for schedule(dynamic)
+            for (size_t k = 0; k < work.size(); k++) {
+                int j = work[k].first, i = work[k].second;
                 int d = j * m1 + i;
-                if (d >= nGlobal) continue;
-                if (sparseDiag[d].empty()) continue;
+                CKKSEncoder thr_encoder(*context);
 
                 vector<double> diag(slot_count, 0.0);
+                // Q7 padding: row ∈ [0, 2N) 채움. inverse map orig_row 가 chunk-translation invariance 보존.
                 for (size_t c = 0; c < batch_size; c++) {
-                    for (int row = 0; row < nGlobal * 2; row++) {
-                        int orig_row = ((row - j * m1) % nGlobal + nGlobal) % nGlobal;
-                        auto it = sparseDiag[d].find(orig_row);
-                        if (it != sparseDiag[d].end()) {
-                            diag[c * pirBlockSize + row] = it->second;
-                        }
+                    for (const auto& [row, val] : sparseDiag[d]) {
+                        // row 위치 1: orig_row == row 일 때 → row index = (row + j*m1) mod N (within chunk)
+                        // padding 둘 다 채우려면 row index ∈ {a, a + N} 위치 모두에 동일 값.
+                        int slot_idx = (row + j * m1) % nGlobal;
+                        diag[c * pirBlockSize + slot_idx] = val;
+                        diag[c * pirBlockSize + slot_idx + nGlobal] = val;  // Q7
                     }
                 }
                 Plaintext plainDiag;
-                encoder->encode(diag, scale, plainDiag);
-                pirDiagonals.push_back({i, j, plainDiag});
+                thr_encoder.encode(diag, scale, plainDiag);
+                results[k] = {i, j, plainDiag};
             }
+            pirDiagonals = std::move(results);
         }
         D_sparse_out = static_cast<int>(pirDiagonals.size());
         cout << "   [B-stat] D_sparse = " << D_sparse_out << " / " << nGlobal
-             << " (sparsity = " << (1.0 - static_cast<double>(D_sparse_out) / nGlobal) << ")" << endl;
+             << " (sparsity = " << (1.0 - static_cast<double>(D_sparse_out) / nGlobal) << ")"
+             << ", OMP_threads = " << num_threads << endl;
         return pirDiagonals;
     }
 
@@ -559,7 +650,7 @@ private:
     /// <param name="allTop">각 타겟별 서브그래프를 구성하는 핵심 노드들의 인덱스 목록입니다.</param>
     /// <param name="M_pub">전역 퍼블릭 매트릭스 원본입니다.</param>
     /// <param name="allTargetSubIdx">각 서브그래프 내 타겟 지갑들의 인덱스 배열입니다.</param>
-    void EvaluatePageRank(const vector<vector<int>>& allTopNodes, const vector<vector<double>>& M_pub, const vector<int>& allTargetSubIdx) {
+    void EvaluatePageRank(const vector<vector<int>>& allTopNodes, const SparseMatrix& M_pub, const vector<int>& allTargetSubIdx) {
         cout << "\n[Phase 5] FHE & Plaintext PageRank Iteration (Executing " << num_chunks << " Chunks)" << endl;
 
         vector<vector<vector<double>>> all_M_sub(num_targets, vector<vector<double>>(nSub, vector<double>(nSub, 0.0)));
@@ -568,7 +659,9 @@ private:
 
         for (size_t c = 0; c < num_targets; c++) {
             for (int i = 0; i < nSub; i++) {
-                for (int j = 0; j < nSub; j++) all_M_sub[c][i][j] = M_pub[allTopNodes[c][i]][allTopNodes[c][j]];
+                // [Q5] sparse M_pub read via SparseGet (const-safe; operator[] 회피).
+                for (int j = 0; j < nSub; j++)
+                    all_M_sub[c][i][j] = SparseGet(M_pub, allTopNodes[c][i], allTopNodes[c][j]);
             }
             double alpha = 0.85, tele = (1.0 - alpha) / nSub;
             for (int j = 0; j < nSub; j++) {

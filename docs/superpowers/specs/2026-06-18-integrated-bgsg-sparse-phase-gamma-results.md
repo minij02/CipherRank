@@ -1,9 +1,10 @@
-# Stage B Phase-γ — Minimum Viable Integration Results
+# Stage B Phase-γ — Full Integration Results
 
 - **Date:** 2026-06-18
 - **Branch:** `feat/bgsg-sparse-integrated`
 - **Base:** A1 HEAD (`882ca9c`, with H-2 thread-local SEAL patch)
 - **Spec reference:** `docs/superpowers/specs/2026-06-18-integrated-bgsg-sparse-design.md` (v2)
+- **Increment over MVB:** P1 (Galois Key Slimming) + B3 (Phase 1 OMP) + Q4 (deterministic sort) + Q5 (sparse M_pub).
 
 ---
 
@@ -20,17 +21,50 @@ Stage B v2 spec defined the full integration roadmap (B0~B9, Q1~Q8, A1 + A2 inhe
 | B8 detection (D_sparse < 2√N) | ✅ done | informational log only; full main-style branch deferred |
 | Q6 D_sparse reporting | ✅ done | returned as out-param of `PreparePublicData` |
 | A1 H-2 thread-local Phase 5 | ✅ inherited | from base branch |
-| **A1 P1 two-pass Galois keys** | ❌ deferred | InitFHE still generates all 1..nGlobal keys |
-| **B3 Phase 1 OMP (B3a per-thread + reduce)** | ❌ deferred | Phase 1 still single-threaded |
-| **B0 Three-Pass canonical order** | ❌ deferred | runs in single-pass since auto-tune isn't reentrant |
-| **B2 phase_kind cost function** | ❌ deferred | Phase 3 still uses fixed `giant_weight=1.0` |
-| **Q4 deterministic sort baseline** | ❌ deferred | `sparseDiag` is `unordered_map` |
-| **Q5 sparse M_pub storage** | ❌ deferred | Phase 5 still uses dense `M_pub` |
+| **A1 P1 Galois key slimming** | ✅ done | `ComputeBSGSStepSet` + step union (Pir ∪ Pr ∪ {1, 16}); 1024→69 keys, 4096→135 keys |
+| **B3 Phase 1 OMP (per-thread + reduce)** | ✅ done | per-thread `unordered_map` accumulator, sequential reduce in thread_id order via `std::map`, then sorted vector |
+| **B0 Three-Pass canonical order** | △ partial | Step set computed pre-init from `weight=1.0` default; auto-tune measurement still runs in-Phase-5 (informational). Full Three-Pass with reentrant weight measurement is follow-up. |
+| **B2 phase_kind cost function** | △ partial | `FindOptimalAsymmetricBSGS` signature unchanged; Phase 3 and Phase 5 call it separately with their own `N`. `(D, ITERATIONS, phase_kind)` extension is follow-up. |
+| **Q4 deterministic sort baseline** | ✅ done | `std::map`-based reduce produces sorted entries; FP accumulation order = thread_id 0..P-1 then row asc |
+| **Q5 sparse M_pub storage** | ✅ done | `SparseMatrix = vector<unordered_map<int, double>>` + `SparseGet` helper; enables nGlobal=4096 demo |
 | **R8'' sybil regression** | ❌ deferred | needs labeled subset |
+| **B8 main-style fallback branch** | △ advisory only | logs when `D_sparse < 2·√N` but does not switch to main-style path |
 
 Deferred items are tracked in the spec as B2/B3/B0/Q5 follow-ups; the items implemented suffice to verify C8 lemma + R1'' + R2'' + R6'' empirically.
 
 ---
+
+## Full Integration Results (Config B, OMP=4)
+
+| Phase | main | A1 only | A2 only | B MVB | **B (full)** | R10'' window | result |
+|---|---:|---:|---:|---:|---:|---|---|
+| InitFHE | 0.09 | 3.28 | 0.09 | 3.18 | **0.23** | [0.16, 0.34] | ✅ inside (P1) |
+| Phase 1 | 7.73 | 2.58 | 2.56 | 2.72 | **0.77** | [0.60, 1.17] | ✅ inside (B3) |
+| Phase 3 | 21.55 | 0.96 | 21.47 | 0.94 | **0.90** | [0.81, 1.27] | ✅ inside |
+| Phase 5+6 | 48.90 | 4.24 | 48.90 | 4.19 | **4.18** | [3.49, 5.18] | ✅ inside |
+| **Total** | **78.30** | 11.09 | 73.05 | 11.07 | **6.12** | [5.06, 7.96] | ✅ **R10'' PASS** |
+| **vs main** | 1.0× | 7.1× | 1.07× | 7.07× | **12.8×** | — | — |
+
+### R1'' / R2'' / R6'' (regression — full integration)
+
+- **R1''** (B-C2 ≡ main, β₁=β₂=1, thr=0) at Config B multi-chunk: max\|Δ\| = 0 on 9/9 targets. ✅ PASS
+- **R2''** (B-default ≡ A2-default, β₂=0.30, thr=0.05): max\|Δ\| ≤ 10⁻⁶ on 9/9 targets. ✅ PASS
+- **R6''** (multi-chunk C8 lemma): 5 chunks, no verdict drift. ✅ PASS
+- **Wallet 4 verdict flip** preserved (Config A): REJECTED → APPROVED. ✅
+
+### nGlobal=4096 Demo (Q5 enabler)
+
+| Metric | Value |
+|---|---|
+| Total wall-clock | 32.72s (main: would need ~minutes for O(N³) Phase 1 alone) |
+| InitFHE | 0.87s (P1: 135 keys; pre-P1 default = 4096 keys) |
+| Phase 1 | 5.86s (sparse + B3 OMP) |
+| Phase 3 | 11.77s (A1 BSGS + OMP) |
+| Phase 5+6 | 14.08s |
+| **Peak RSS** | **2.625 GB** (Q5 sparse M_pub; pre-Q5 dense M_pub alone would add 128 MB but mostly Phase 5 baby_steps replication × 4 threads) |
+| Precision Error | 0.000000 on 9/9 targets |
+
+NG-B1 honored: main is not run at 4096 (impractical), so no direct head-to-head comparison.
 
 ## Code Changes (~150 LOC delta)
 
@@ -137,13 +171,10 @@ Projected post-P1+B3 total: 0.20 + 0.71 + 0.94 + 4.19 ≈ **6.04s** — inside t
 
 ## Open Items
 
-The MVB validates the load-bearing lemma (C8) and the semantic equivalence layer (R1'', R2'', R6''). To complete Stage B per the spec, the following remain:
+The full integration above lands all load-bearing pieces (C8 lemma, R1''/R2''/R6'', R10'' window) and enables the nGlobal=4096 demo. Remaining follow-up:
 
-1. **A1 P1 two-pass Galois key generation** — closes InitFHE gap (~3s saving)
-2. **B3 Phase 1 OMP** with `B3a` per-thread accumulator + sequential reduce — closes Phase 1 gap (~2s saving)
-3. **B0 Three-Pass canonical order** — currently runs auto-tune off the same key set; needs Pass-1 seed → Pass-2 measurement → Pass-3 final keys
-4. **B2 phase_kind cost function** — Phase 3 and Phase 5 still optimize against the same `(D, weight)`
-5. **Q4 deterministic sort** — needed before B3 (race) and before R11'' (cross-run consistency)
-6. **Q5 sparse M_pub** — required for the nGlobal=4096 demo (memory bottleneck)
-7. **B8 main-style fallback branch** — advisory log only; not exercised on BitcoinOTC at default params
-8. **Sweep + R10''/R11'' formal verification** — needs items 1-5 first
+1. **B0 Three-Pass canonical order** — currently the step set is computed from `weight=1.0` default at startup, and the in-Phase-5 auto-tune measurement is kept for diagnostic purposes only (its computed `(m1, m2)` is not actually used since the Galois keys are already fixed). A proper Three-Pass refactor would (a) generate seed keys for measurement, (b) measure weight and D_sparse, (c) recompute `(m1, m2)` from the measurement, (d) regenerate the production keys. The current shortcut works at this machine because the measured `weight` happens to land near 1.0 — re-evaluate on hardware with different rotation cost ratios.
+2. **B2 phase_kind cost function** — `FindOptimalAsymmetricBSGS(N, weight, D, ITERATIONS, phase_kind)` per spec; currently passes only `(N, weight)` and tacitly assumes identical D / I for both phases.
+3. **B8 main-style fallback branch** — advisory log only when `D_sparse < 2·√N`; on BitcoinOTC at default params this branch never fires.
+4. **R8'' sybil regression** — needs labeled subset; not run.
+5. **Formal sweep** — full sec 6.2 sweep (664 runs, Coarse + OMP-axis + Demo + Fine grid) not executed; this report covers smoke tests at Config A / Config B and the 4096 demo only.
