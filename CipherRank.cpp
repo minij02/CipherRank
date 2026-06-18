@@ -162,10 +162,15 @@ private:
     // P1 (Galois Key Slimming): InitializeFHE 직전에 RunPipeline 에서 채워넣음.
     vector<int> galois_step_set_;
 
+    // 데이터셋 경로 (default: BitcoinOTC). synthetic sybil 주입 dataset 전환에 사용.
+    string csv_path_ = "../soc-sign-bitcoinotc.csv";
+
 public:
     void SetConfig(double b1, double b2, double thr) {
         beta1_ = b1; beta2_ = b2; prune_threshold_ = thr;
     }
+
+    void SetCsvPath(const string& path) { csv_path_ = path; }
 
 private:
 
@@ -351,8 +356,7 @@ private:
         cout << "   [B-config] beta1=" << beta1 << ", beta2=" << beta2
              << ", prune_threshold=" << prune_threshold << endl;
 
-        string snapFilePath = "../soc-sign-bitcoinotc.csv";
-        ifstream file(snapFilePath);
+        ifstream file(csv_path_);
         vector<Edge> rawEdges;
         unordered_map<int, int> frequency;
         int maxTime = 0;
@@ -445,9 +449,11 @@ private:
 
         // Reduce: thread_id 0..P-1 순서로 sequential 합산 → FP 결합 결정론.
         // 그 후 Q4: 각 d 의 entry 를 row 오름차순 sorted vector 로 변환.
+        // β₂=0 케이스: 2-hop 합산이 모두 0 인 (row, 0.0) 항목은 제거해야
+        //   BSGS encode 시 all-zero diagonal 이 SEAL "transparent ciphertext" 예외를 던지지 않음.
         vector<vector<pair<int, double>>> sparseDiag(nGlobal);
         {
-            vector<map<int, double>> merged(nGlobal);  // std::map = sorted by row
+            vector<map<int, double>> merged(nGlobal);
             for (int t = 0; t < num_threads; t++) {
                 for (int d = 0; d < nGlobal; d++) {
                     for (const auto& [row, val] : tlSparseDiag[t][d]) {
@@ -456,7 +462,9 @@ private:
                 }
             }
             for (int d = 0; d < nGlobal; d++) {
-                sparseDiag[d].assign(merged[d].begin(), merged[d].end());
+                for (const auto& [row, val] : merged[d]) {
+                    if (val != 0.0) sparseDiag[d].emplace_back(row, val);
+                }
             }
         }
 
@@ -868,6 +876,7 @@ int main(int argc, char* argv[]) {
         double req_beta1 = 1.0;
         double req_beta2 = 0.30;
         double req_thr = 0.05;
+        string req_csv = "";  // empty -> binary 의 기본 BitcoinOTC 경로 사용
 
         for (int i = 1; i < argc; i++) {
             string arg = argv[i];
@@ -881,6 +890,8 @@ int main(int argc, char* argv[]) {
                 req_beta2 = stod(argv[++i]);
             } else if (arg == "-thr" && i + 1 < argc) {
                 req_thr = stod(argv[++i]);
+            } else if (arg == "-csv" && i + 1 < argc) {
+                req_csv = argv[++i];
             } else {
                 targetIds.push_back(stoi(arg));
             }
@@ -912,6 +923,7 @@ int main(int argc, char* argv[]) {
 
         UltimatePrivacyPipeline pipeline(targetIds, req_nGlobal, req_nSub, poly_degree);
         pipeline.SetConfig(req_beta1, req_beta2, req_thr);
+        if (!req_csv.empty()) pipeline.SetCsvPath(req_csv);
         pipeline.RunPipeline();
         
     } catch (const exception& e) {

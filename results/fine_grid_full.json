@@ -1,0 +1,2086 @@
+{
+  "meta": {
+    "reps": 3
+  },
+  "cells": [
+    {
+      "mode": "B_b2=0.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.229332,
+        "Phase 1": 0.764915,
+        "Phase 2": 0.0215402,
+        "Phase 3": 0.884324,
+        "Phase 4": 0.0125997,
+        "Phase 5 & 6": 4.198536,
+        "total": 6.111343
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224404,
+        "Phase 1": 0.757344,
+        "Phase 2": 0.021302,
+        "Phase 3": 0.897739,
+        "Phase 4": 0.012576,
+        "Phase 5 & 6": 4.29221,
+        "total": 6.205678
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.226742,
+        "Phase 1": 0.753068,
+        "Phase 2": 0.021518,
+        "Phase 3": 0.915613,
+        "Phase 4": 0.0126552,
+        "Phase 5 & 6": 4.302644,
+        "total": 6.232346
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223931,
+        "Phase 1": 0.757929,
+        "Phase 2": 0.0216117,
+        "Phase 3": 0.931461,
+        "Phase 4": 0.0124324,
+        "Phase 5 & 6": 4.346908,
+        "total": 6.294373
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224944,
+        "Phase 1": 0.760192,
+        "Phase 2": 0.0218321,
+        "Phase 3": 0.938994,
+        "Phase 4": 0.0127406,
+        "Phase 5 & 6": 4.42696,
+        "total": 6.385764
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224794,
+        "Phase 1": 0.769035,
+        "Phase 2": 0.0219884,
+        "Phase 3": 0.994802,
+        "Phase 4": 0.0125512,
+        "Phase 5 & 6": 4.444269,
+        "total": 6.467547
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223927,
+        "Phase 1": 0.747031,
+        "Phase 2": 0.0225065,
+        "Phase 3": 0.959695,
+        "Phase 4": 0.0125896,
+        "Phase 5 & 6": 4.457158,
+        "total": 6.423004
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224785,
+        "Phase 1": 0.752959,
+        "Phase 2": 0.0225275,
+        "Phase 3": 0.965885,
+        "Phase 4": 0.0126461,
+        "Phase 5 & 6": 4.51318,
+        "total": 6.492085
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.225411,
+        "Phase 1": 0.77279,
+        "Phase 2": 0.0228432,
+        "Phase 3": 0.989791,
+        "Phase 4": 0.0126663,
+        "Phase 5 & 6": 4.533873,
+        "total": 6.55747
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028735,
+        "2": 0.006092,
+        "4": 0.006734,
+        "35": 0.026411,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224899,
+        "Phase 1": 0.82169,
+        "Phase 2": 0.022434,
+        "Phase 3": 1.07317,
+        "Phase 4": 0.0128538,
+        "Phase 5 & 6": 4.675371,
+        "total": 6.83052
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025894,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223871,
+        "Phase 1": 0.796611,
+        "Phase 2": 0.0364765,
+        "Phase 3": 1.00396,
+        "Phase 4": 0.0128195,
+        "Phase 5 & 6": 4.52191,
+        "total": 6.595745
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025893,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.225475,
+        "Phase 1": 0.813936,
+        "Phase 2": 0.0226883,
+        "Phase 3": 1.00029,
+        "Phase 4": 0.0129694,
+        "Phase 5 & 6": 4.536062,
+        "total": 6.611518
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025894,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223764,
+        "Phase 1": 0.796355,
+        "Phase 2": 0.0235721,
+        "Phase 3": 0.997199,
+        "Phase 4": 0.012751,
+        "Phase 5 & 6": 4.547108,
+        "total": 6.600843
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025894,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224806,
+        "Phase 1": 0.797742,
+        "Phase 2": 0.0242441,
+        "Phase 3": 0.998265,
+        "Phase 4": 0.0127795,
+        "Phase 5 & 6": 4.575987,
+        "total": 6.633917
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025893,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223392,
+        "Phase 1": 0.802663,
+        "Phase 2": 0.0223018,
+        "Phase 3": 0.998442,
+        "Phase 4": 0.0126995,
+        "Phase 5 & 6": 4.546179,
+        "total": 6.605781
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.025894,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.029468,
+        "25": 0.050181,
+        "7": 0.028075,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223953,
+        "Phase 1": 0.771537,
+        "Phase 2": 0.0227595,
+        "Phase 3": 0.99619,
+        "Phase 4": 0.0130742,
+        "Phase 5 & 6": 4.554432,
+        "total": 6.582036
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028379,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.22387,
+        "Phase 1": 0.780961,
+        "Phase 2": 0.0237619,
+        "Phase 3": 0.998472,
+        "Phase 4": 0.0124592,
+        "Phase 5 & 6": 4.561842,
+        "total": 6.601462
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028379,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=0.3_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.224429,
+        "Phase 1": 0.783469,
+        "Phase 2": 0.0236799,
+        "Phase 3": 1.00209,
+        "Phase 4": 0.0127063,
+        "Phase 5 & 6": 4.672202,
+        "total": 6.71868
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.028379,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.22243,
+        "Phase 1": 0.810626,
+        "Phase 2": 0.0229187,
+        "Phase 3": 1.04609,
+        "Phase 4": 0.0132011,
+        "Phase 5 & 6": 93.5039,
+        "total": 95.619268
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022786,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.225711,
+        "Phase 1": 0.752032,
+        "Phase 2": 0.0211841,
+        "Phase 3": 0.915906,
+        "Phase 4": 0.012576,
+        "Phase 5 & 6": 1054.129777,
+        "total": 1056.057279
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022786,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.0",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.221507,
+        "Phase 1": 1.77355,
+        "Phase 2": 0.213685,
+        "Phase 3": 3.29537,
+        "Phase 4": 0.0183249,
+        "Phase 5 & 6": 9.108361,
+        "total": 14.630998
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022786,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.301142,
+        "Phase 1": 2.10223,
+        "Phase 2": 0.070846,
+        "Phase 3": 2.36691,
+        "Phase 4": 0.0197117,
+        "Phase 5 & 6": 1059.30927,
+        "total": 1064.170266
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022786,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.214172,
+        "Phase 1": 0.761723,
+        "Phase 2": 0.0213308,
+        "Phase 3": 0.877305,
+        "Phase 4": 0.0127156,
+        "Phase 5 & 6": 933.292194,
+        "total": 935.179529
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022786,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.05",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.216587,
+        "Phase 1": 0.750059,
+        "Phase 2": 0.0211678,
+        "Phase 3": 0.889067,
+        "Phase 4": 0.0125561,
+        "Phase 5 & 6": 61.275049,
+        "total": 63.164575
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.022787,
+        "2": 0.007078,
+        "4": 0.006627,
+        "35": 0.028612,
+        "25": 0.050181,
+        "7": 0.02298,
+        "88": 0.001733,
+        "100": 0.000816,
+        "200": 0.000878
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.223618,
+        "Phase 1": 0.771085,
+        "Phase 2": 0.0258711,
+        "Phase 3": 1.12817,
+        "Phase 4": 0.012801,
+        "Phase 5 & 6": 5.858325,
+        "total": 8.019997
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.02632,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.259538,
+        "Phase 1": 0.824197,
+        "Phase 2": 0.021771,
+        "Phase 3": 1.0252,
+        "Phase 4": 0.0128031,
+        "Phase 5 & 6": 4.636452,
+        "total": 6.780052
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.02632,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    },
+    {
+      "mode": "B_b2=1.0_thr=0.5",
+      "n_global": 1024,
+      "n_sub": 256,
+      "targets_requested": [
+        1,
+        2,
+        4,
+        35,
+        25,
+        7,
+        88,
+        100,
+        200
+      ],
+      "omp_threads": 4,
+      "phases": {
+        "init": 0.228761,
+        "Phase 1": 0.773879,
+        "Phase 2": 0.022091,
+        "Phase 3": 0.945187,
+        "Phase 4": 0.0130003,
+        "Phase 5 & 6": 4.606109,
+        "total": 6.589135
+      },
+      "verdicts": [
+        {
+          "wid": 1,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 2,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 4,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 35,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 25,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 7,
+          "verdict": "APPROVED"
+        },
+        {
+          "wid": 88,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 100,
+          "verdict": "REJECTED"
+        },
+        {
+          "wid": 200,
+          "verdict": "REJECTED"
+        }
+      ],
+      "scores": {
+        "1": 0.02632,
+        "2": 0.006109,
+        "4": 0.00628,
+        "35": 0.027992,
+        "25": 0.050181,
+        "7": 0.029413,
+        "88": 0.001497,
+        "100": 0.000737,
+        "200": 0.000806
+      },
+      "out_of_range": [],
+      "returncode": 0
+    }
+  ]
+}

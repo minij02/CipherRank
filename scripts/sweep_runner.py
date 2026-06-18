@@ -44,6 +44,10 @@ EXTRA_FLAGS = {
     "B-C2": ["-b1", "1.0", "-b2", "1.0", "-thr", "0"],
 }
 
+# Per-mode CSV path (synthetic sybil dataset injection).
+# Updated in main() when --csv passed; here we keep defaults.
+CSV_PATHS = {}
+
 PHASE_RE = re.compile(r"\[Timer\] (?P<phase>.+?) Completed : (?P<t>[0-9.eE+-]+) sec")
 INIT_RE  = re.compile(r"\[Timer\] Initialize FHE : (?P<t>[0-9.eE+-]+) sec")
 TOTAL_RE = re.compile(r"\[Total Timer\] Total Pipeline Completed : (?P<t>[0-9.eE+-]+) sec")
@@ -54,11 +58,14 @@ REJECTED_RE = re.compile(r"\[REJECTED\]")
 OUTRANGE_RE = re.compile(r"Wallet ID (?P<wid>\d+) is out of range")
 
 
-def run_once(mode, n_global, n_sub, targets, omp_threads=4):
+def run_once(mode, n_global, n_sub, targets, omp_threads=4, csv_path=None):
     bin_path = BINS[mode]
     cwd = CWDS[mode]
     args = [bin_path, "-g", str(n_global), "-s", str(n_sub)]
     args.extend(EXTRA_FLAGS.get(mode, []))
+    # Only the B / B-C2 binary (this branch) supports -csv; others stay on default.
+    if csv_path and mode in ("B", "B-C2"):
+        args.extend(["-csv", csv_path])
     args.extend(str(t) for t in targets)
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = str(omp_threads)
@@ -95,14 +102,17 @@ def run_once(mode, n_global, n_sub, targets, omp_threads=4):
     return res
 
 
-def run_sweep_cell(modes, n_global, n_sub, targets, reps, omp_threads=4):
+def run_sweep_cell(modes, n_global, n_sub, targets, reps, omp_threads=4,
+                   csv_path=None, extra_flags_per_mode=None):
     cells = []
     for mode in modes:
         for rep in range(reps):
             print(f"  [{mode}] N={n_global},s={n_sub},OMP={omp_threads},rep={rep+1}/{reps}",
                   flush=True)
             try:
-                res = run_once(mode, n_global, n_sub, targets, omp_threads)
+                res = run_once(mode, n_global, n_sub, targets, omp_threads, csv_path=csv_path)
+                if extra_flags_per_mode and mode in extra_flags_per_mode:
+                    res["extra_config"] = extra_flags_per_mode[mode]
                 cells.append(res)
             except Exception as e:
                 print(f"    ERROR {mode}: {e}", flush=True)
@@ -110,6 +120,22 @@ def run_sweep_cell(modes, n_global, n_sub, targets, reps, omp_threads=4):
                               "n_global": n_global, "n_sub": n_sub,
                               "targets_requested": list(targets)})
     return cells
+
+
+def bootstrap_ci(values, n_resample=2000, alpha=0.05, seed=42):
+    """Return (median, lower, upper) at 1-alpha confidence."""
+    import random as _r
+    if not values: return (None, None, None)
+    rng = _r.Random(seed)
+    n = len(values)
+    medians = []
+    for _ in range(n_resample):
+        sample = [values[rng.randrange(n)] for _ in range(n)]
+        medians.append(statistics.median(sample))
+    medians.sort()
+    lo = medians[int(n_resample * alpha / 2)]
+    hi = medians[int(n_resample * (1 - alpha / 2))]
+    return (statistics.median(values), lo, hi)
 
 
 def summarize_cells(cells, metric="total"):
@@ -164,6 +190,15 @@ def main():
     parser.add_argument("--sybil",  action="store_true", help="Run R8'' sybil regression")
     parser.add_argument("--demo",   action="store_true", help="Run nGlobal=4096 demo cell")
     parser.add_argument("--omp-axis", action="store_true", help="Run OMP axis sweep on B")
+    parser.add_argument("--synthetic-sybil", action="store_true",
+                        help="Run R8'' against synthetic-sybil CSV (B and B-C2)")
+    parser.add_argument("--csv", default=None, help="Override CSV path for B/B-C2")
+    parser.add_argument("--fine-grid", action="store_true",
+                        help="3x3 beta2 x threshold grid sweep on B at nGlobal=1024")
+    parser.add_argument("--n2048", action="store_true",
+                        help="A1 + B at nGlobal=2048")
+    parser.add_argument("--big-n", action="store_true",
+                        help="N=10 supplement on B at nGlobal=1024 (95% bootstrap CI)")
     parser.add_argument("--reps", type=int, default=3)
     args = parser.parse_args()
 
@@ -212,12 +247,55 @@ def main():
             "verdict_table": compute_verdict_table(cells, sybil_set, trusted_set),
         }
 
+    # ---- Synthetic sybil R8'' (B + B-C2 only — uses -csv flag) ----
+    if args.synthetic_sybil:
+        sybil = list(range(9000, 9050))
+        targets = sybil  # 50 sybil targets, no trusted (FPR not measurable here)
+        sybil_set, trusted_set = set(sybil), set()
+        print("== R8'' synthetic sybil (50 sybils, B vs B-C2) ==")
+        csv_path = args.csv or "../soc-sign-bitcoinotc-synthetic.csv"
+        cells = run_sweep_cell(["B", "B-C2"], 1024, 256, targets, args.reps, csv_path=csv_path)
+        results["cells"].extend(cells)
+        results["synthetic_sybil"] = {
+            "sybil_targets": sybil,
+            "verdict_table": compute_verdict_table(cells, sybil_set, trusted_set),
+        }
+
+    # ---- Fine beta2 x threshold grid on B ----
+    if args.fine_grid:
+        targets = [1, 2, 4, 35, 25, 7, 88, 100, 200]
+        grid_b2 = [0.0, 0.30, 1.0]
+        grid_thr = [0.0, 0.05, 0.5]
+        for b2 in grid_b2:
+            for thr in grid_thr:
+                tag = f"B_b2={b2}_thr={thr}"
+                print(f"== Fine grid: {tag} ==")
+                # Use the B binary but with custom flags
+                BINS[tag] = BINS["B"]; CWDS[tag] = CWDS["B"]
+                EXTRA_FLAGS[tag] = ["-b1", "1.0", "-b2", str(b2), "-thr", str(thr)]
+                results["cells"].extend(
+                    run_sweep_cell([tag], 1024, 256, targets, args.reps))
+
+    # ---- nGlobal=2048 cell ----
+    if args.n2048:
+        targets = [1, 2, 4, 35, 25, 7, 88, 100, 200]
+        print("== nGlobal=2048 (A1 + B; main and A2 deferred) ==")
+        results["cells"].extend(
+            run_sweep_cell(["A1", "B"], 2048, 256, targets, args.reps))
+
+    # ---- B at N=10 (95% bootstrap CI) ----
+    if args.big_n:
+        targets = [1, 2, 4, 35, 25, 7, 88, 100, 200]
+        print("== B big-N at nGlobal=1024 multi-chunk (N=10) ==")
+        results["cells"].extend(
+            run_sweep_cell(["B"], 1024, 256, targets, 10))
+
     # ---- Save ----
     Path(args.out).write_text(json.dumps(results, indent=2))
     print(f"\nSaved results to {args.out}")
 
     # ---- Print summary ----
-    print("\n=== Wall-clock summary (median of total) ===")
+    print("\n=== Wall-clock summary ===")
     by_cfg = defaultdict(list)
     for c in results["cells"]:
         key = (c.get("n_global"), c.get("n_sub"), c.get("omp_threads"))
@@ -226,17 +304,27 @@ def main():
         ng, ns, omp = key
         if ng is None: continue
         print(f"\nnGlobal={ng}, nSub={ns}, OMP={omp}")
-        summ = summarize_cells(cells, "total")
-        for mode in ("main", "A1", "A2", "B", "B-C2"):
-            if mode in summ:
-                s = summ[mode]
-                print(f"  {mode:6s}  median={s['median']:.3f}s  (n={s['n']})")
+        by_mode = defaultdict(list)
+        for c in cells:
+            if "phases" in c and "total" in c["phases"]:
+                by_mode[c["mode"]].append(c["phases"]["total"])
+        for mode in sorted(by_mode.keys()):
+            vals = by_mode[mode]
+            med, lo, hi = bootstrap_ci(vals)
+            n = len(vals)
+            print(f"  {mode:25s}  median={med:.3f}s  95% CI=[{lo:.3f}, {hi:.3f}]  (n={n})")
+
     if "sybil" in results:
-        print("\n=== R8'' Sybil regression ===")
+        print("\n=== R8'' Natural-sybil verdict table ===")
         for mode, row in results["sybil"]["verdict_table"].items():
-            print(f"  {mode:6s}  TPR={row['TPR_sybil_rejected']:.2f}  "
+            print(f"  {mode:8s}  TPR={row['TPR_sybil_rejected']:.2f}  "
                   f"FPR={row['FPR_trusted_rejected']:.2f}  "
                   f"(n_sybil={row['n_sybil']}, n_trusted={row['n_trusted']})")
+    if "synthetic_sybil" in results:
+        print("\n=== R8'' Synthetic-sybil verdict table ===")
+        for mode, row in results["synthetic_sybil"]["verdict_table"].items():
+            print(f"  {mode:8s}  TPR={row['TPR_sybil_rejected']:.2f}  "
+                  f"(n_sybil={row['n_sybil']})")
 
 
 if __name__ == "__main__":
