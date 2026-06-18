@@ -1,64 +1,30 @@
-# 2. Phase 1 — 그래프 전처리
+# 2. 그래프 전처리
 
-Phase 1 은 BitcoinOTC csv 를 받아 두 가지를 만든다. 하나는 Phase 5 에서 부분 그래프 구성에 쓰일 1-hop 가중치 행렬 `M_pub`, 다른 하나는 Phase 3 PIR 의 평문 데이터인 BsgsDiag 리스트다. 이 문서는 한 줄의 csv 가 어떤 변환을 거쳐 어떤 형태로 끝나는지 추적한다.
+Phase 1 의 목적은 BitcoinOTC csv 로부터 두 가지 산출물을 구성하는 데 있다. 하나는 Phase 5 가 부분 그래프를 재구성할 때 참조하는 1-홉 가중치 행렬 `M_pub` 이며, 다른 하나는 Phase 3 의 PIR 단계에서 평문 입력으로 사용되는 BSGS 대각선 리스트 `pirDiagonals` 이다. 본 장은 csv 한 행이 어떤 변환 과정을 거쳐 이들 두 산출물의 일부가 되는지를 §2.1 부터 §2.6 까지 순서대로 기술하고, 끝으로 §2.A 의 부록에서 N = 4 가상 예제 위에서의 손 계산 결과를 정의식과 직접 비교한다.
 
-코드 참조 위치는 통합 (`feat/bgsg-sparse-integrated`) 의 `CipherRank.cpp` 기준이다.
+## 2.1 빈도 기반 전역 인덱싱
 
-## 2.1 csv 한 줄이 들어왔을 때
+csv 파서 (`CipherRank.cpp:359–383`) 는 행을 한 줄씩 읽으면서 가중치가 2 이상인 행을 `rawEdges` 에 적재하고, 그 행의 송신자와 수신자에 대해 각각 `frequency` 카운트를 1 씩 증가시킨다. 시각 필드는 `int` 변환이 실패할 경우 `catch(...)` 로 무시되어 정수 부분만 살아남는다. 모든 행을 읽고 난 후의 `maxTime` 은 §2.2 의 시간 감쇠 기준점으로 사용된다.
 
-다음 한 줄을 예로 들자.
+빈도 카운트가 완성되면 내림차순으로 정렬하여 상위 N 개의 노드만 `globalNodeToIndex` 에 등록한다. 이 매핑에 등재되지 못한 노드는 이후 모든 계산에서 *존재하지 않는 것으로 간주* 되며, 평가 요청 목록에 그러한 노드가 포함된 경우 `[WARNING] Wallet ID X is out of range.` 의 로그가 출력되고 해당 요청은 평가에서 제외된다.
 
-```
-6,2,4,1289241911.72836
-```
+BitcoinOTC 데이터셋에서 상위 1024 위 노드의 빈도는 일반적으로 6 에서 8 사이의 값을 갖는다. 따라서 자연 sybil 검출의 대상이 되는 노드는 빈도가 이 컷오프 이상이어야 평가 가능 영역에 들어온다.
 
-`CipherRank.cpp:354–390` 의 파서는 이 줄을 다음과 같이 다룬다.
+## 2.2 시간 감쇠
 
-1. `parts[0]=6`, `parts[1]=2`, `parts[2]=4`, `parts[3]` 은 `int` 변환 실패 → `catch(...){}` 로 무시된다 (소수점 때문). 그러나 `parts[2]>=2` 필터는 통과한다.
-2. 그러므로 이 행은 `rawEdges.push_back({6, 2, 4, 1289241911})` 로 저장되고, `frequency[6]++; frequency[2]++` 가 일어난다. `maxTime` 변수에는 모든 행을 본 후의 최대 시각이 남는다.
-
-원본 35,592 행을 다 훑으면 `parts[2] >= 2` 를 통과하는 행이 정확히 **11,981 개**, 등장 노드 (`frequency` 의 키 집합 크기) 가 **3,302 개**, `maxTime` ≈ 1453684323 (2016년 1월) 이다.
-
-음수 평점을 통째로 버린다는 점은 의미 모델에 직접 영향을 준다. 신뢰가 아니라 *불신* 신호를 가진 간선이 입력 단계에서 사라지므로, 자연 sybil 의 검출이 weight ≥ 2 신호만으로 이뤄지게 된다. 5절 ("엣지케이스") 에서 다시 다룬다.
-
-## 2.2 빈도 기준 top-N 선택
-
-`frequency` 는 한 노드가 *송신자나 수신자로 등장한 횟수* 다. 즉 in-degree 와 out-degree 의 합이다. 코드의 `CipherRank.cpp:381–386`:
+신뢰 평점은 시간이 경과할수록 그 영향력이 감소한다는 직관에 따라, 본 시스템은 반감기 1 년의 지수 감쇠를 적용한다 (`CipherRank.cpp:412`).
 
 ```cpp
-vector<pair<int,int>> freqVec(frequency.begin(), frequency.end());
-sort(freqVec.begin(), freqVec.end(),
-     [](auto& a, auto& b){ return a.second > b.second; });
-unordered_map<int,int> globalNodeToIndex;
-for (size_t i = 0; i < min(freqVec.size(), (size_t)nGlobal); i++)
-    globalNodeToIndex[freqVec[i].first] = i;
-```
-
-이렇게 `nGlobal=1024` 면 상위 1024 명만 `globalNodeToIndex` 에 매핑된다. 그 외 노드는 *이후 모든 계산에서 존재하지 않는 것처럼 다뤄진다*. `requestedWalletIds` 에 있더라도 매핑에 없으면 그 줄은 `[WARNING] Wallet ID X is out of range.` 로 떨어지고 평가에서 제외된다.
-
-상위 1024 위 노드의 frequency 는 BitcoinOTC 에서 대체로 6~8 정도다. 자연 sybil 후보 (음수 평점을 다수 받는 노드) 는 frequency 가 이 컷오프 이상이어야 평가 가능하다는 뜻이다. 5절의 사용자 식별 절차는 이 컷오프 이상의 노드들에 한정해서 sybil 후보를 골랐다.
-
-`unordered_map` 자체는 빌드별로 해시 순서가 결정적이지 않을 수 있으나 (Q4 baseline 으로 후속 reduce 단계에서 sorted vector 로 직렬화한다), `globalNodeToIndex` 의 인덱스 자체는 `freqVec` 의 정렬 결과 → 빈도 동률일 때 unordered_map 노드 순서 → 결정적인지 의문이 남는다. 다행히 BitcoinOTC 에서 상위 1024 명의 빈도가 거의 모두 다르므로, 실측에선 cross-run 인덱스가 안정적이었다. 더 험한 데이터셋에서는 `std::map` 으로 교체해 안전을 보강해야 한다.
-
-## 2.3 시간 감쇠
-
-신뢰 평점은 시간이 지날수록 약화되어야 합리적이다. 코드는 반감기 1년의 지수 감쇠를 쓴다.
-
-`CipherRank.cpp:407`:
-
-```cpp
-double HALF_LIFE = 365.0 * 24.0 * 60.0 * 60.0;        // 1 year in seconds
+double HALF_LIFE = 365.0 * 24.0 * 60.0 * 60.0;
 double decay = pow(0.5, (maxTime - edge.time) / HALF_LIFE);
 double w = edge.weight * decay;
 ```
 
-예를 들어 위 첫 줄 (`time = 1289241911`, weight = 4) 이 `maxTime ≈ 1453684323` 보다 5.21 년 전이라면 decay = 0.5^5.21 ≈ 0.0269, w = 4 × 0.0269 ≈ 0.108. 같은 +4 평점이라도 최근 거래라면 w ≈ 4, 6년 전 거래라면 w ≈ 0.06 정도가 된다. 이 양은 다음 단계의 가지치기 임계값 θ = 0.05 의 직접적인 기준이 된다 — 너무 오래된 +2 평점은 자동으로 2-hop 전파에서 잘리고, 최근 +3 평점은 그대로 살아남는다.
+이 감쇠 계수는 가지치기 임계값 θ = 0.05 와 직접적으로 연결된다. BitcoinOTC 의 `maxTime` 이 2016 년 1 월 무렵이므로, 그로부터 5 년 전의 +4 평점은 감쇠 후 `4 × 0.5⁵ = 0.125` 수준의 가중치만 보유하며, 6 년 전의 동일 평점은 `4 × 0.5⁶ ≈ 0.0625` 로 떨어진다. θ 와의 직접 비교가 가능하므로, 본 감쇠 모델은 사실상 2-홉 전파의 시간 윈도를 5 년 안쪽으로 자연스럽게 좁히는 효과를 갖는다.
 
-## 2.4 1-hop 행렬 M_pub
+## 2.3 1-홉 가중치 행렬과 인접 리스트
 
-`outM_pub` 은 행이 수신자, 열이 송신자인 가중치 행렬이다. `outM_pub[tgt][src] = w` 는 "송신자 src 가 수신자 tgt 에게 시간 감쇠된 가중치 w 만큼의 신뢰를 보냈다"를 뜻한다. 같은 (src, tgt) 쌍에 여러 거래가 있으면 누적된다 (`+=`). 같은 데이터셋에서 (1, 15, 1) 과 (1, 15, 4) 가 모두 있을 수 있고, 둘 다 weight ≥ 2 필터를 통과하는 것만 누적된다.
-
-통합 브랜치에서는 같은 루프에서 인접 리스트 `outAdj` 도 함께 만든다 (`CipherRank.cpp:412–423`):
+`outM_pub` 은 행이 수신자, 열이 송신자인 가중치 행렬이며, `outM_pub[tgt][src] += w` 의 누적으로 채워진다. 같은 (송신자, 수신자) 쌍에 대해 csv 에 여러 행이 존재하는 경우 모두 누적된다. 통합 브랜치에서는 동일한 루프에서 인접 리스트 `outAdj` 도 함께 구성되며 (`CipherRank.cpp:413–422`), 이는 §2.4 의 희소 2-홉 누적의 기반 자료구조가 된다.
 
 ```cpp
 for (const auto& edge : rawEdges) {
@@ -73,46 +39,53 @@ for (const auto& edge : rawEdges) {
 }
 ```
 
-`outM_pub` 은 Phase 5 가 부분 그래프를 다시 끌어올 때 쓴다 (Q5 적용 후 dense 가 아닌 sparse 표현, `vector<unordered_map<int,double>>`). `outAdj[srcIdx]` 는 송신자별 출간선 리스트로, 다음 절의 2-hop 누적의 기본 자료구조다.
+Q5 의 도입에 따라 `outM_pub` 자체는 `vector<unordered_map<int, double>>` 형태의 희소 표현으로 유지된다. 이는 Phase 5 에서 부분 행렬을 구성할 때 `operator[]` 가 미존재 키에 0 을 *삽입* 해 버리는 부작용을 피하기 위한 설계이며, 부분 행렬 추출은 const-safe 한 `SparseGet` 함수를 통해 이루어진다.
 
-## 2.5 2-hop 누적 — A2 의 의미 변경
+## 2.4 희소 2-홉 누적의 의미 모델
 
-baseline 의 Phase 1 은 마무리로 `M_total = outM_pub + outM_pub · outM_pub` 의 N × N × N 곱을 직접 한다. 이는 *2-hop 전파의 모든 경로* 를 합산하는 셈인데, 신뢰 모델로 보면 *모든* 1-hop 을 동일하게 2-hop 으로 전파한다는 의미다.
+baseline 구현의 Phase 1 은 마지막 단계에서 `M_total = M_pub + M_pub · M_pub` 의 N × N × N 행렬 곱을 직접 수행한다. 이는 모든 1-홉 간선을 동일하게 2-홉 으로 전파한다는 의미를 가지며, N = 1024 의 경우 약 10⁹ 회의 부동소수점 곱셈을 요구한다.
 
-A2 와 B 는 이 부분을 다음과 같이 바꾼다. 모든 src 에 대해, src 의 출간선 (mid, w₁) 을 훑으며 (`CipherRank.cpp:440–451`)
+본 시스템은 이 dense 곱을 인접 리스트 기반의 직접 누적으로 대체하면서, 동시에 의미 모델을 다음과 같이 일반화한다 (`CipherRank.cpp:434–447`).
 
 ```cpp
 for (const auto& [mid, w1] : outAdj[src]) {
     int d1 = (src - mid + nGlobal) % nGlobal;
-    localDiag[d1][mid] += beta1 * w1;            // 1-hop, M_pub[mid][src]
+    localDiag[d1][mid] += beta1 * w1;
 
-    if (w1 < prune_threshold) continue;           // 약한 1-hop은 2-hop 전파 X
+    if (w1 < prune_threshold) continue;
 
     for (const auto& [dst, w2] : outAdj[mid]) {
         int d2 = (src - dst + nGlobal) % nGlobal;
-        localDiag[d2][dst] += beta2 * w1 * w2;   // β₂-가중 2-hop, M_pub^2[dst][src]
+        localDiag[d2][dst] += beta2 * w1 * w2;
     }
 }
 ```
 
-이 루프가 만들어내는 양 `localDiag[d][row]` 의 의미를 풀어보자. 인덱스 `d = (src - row + N) mod N` 는 행 `row` 에서 열이 `(row + d) mod N = src` 가 되는, 즉 행렬 `M_pub[row][src]` 의 위치에 해당한다.
+여기서 인덱스 `d = (src − row + N) mod N` 는 행 `row` 의 열이 `(row + d) mod N = src` 가 되는 자리, 즉 행렬 `M_pub[row][src]` 에 대응한다. 위 누적의 의미는 다음 두 식으로 정리된다.
 
-- 1-hop 누적: src 가 (`row + d`) 에 해당, mid 가 row 위치. 따라서 `localDiag[d1][mid] += β₁ · w₁ = β₁ · M_pub[mid][src]`. 모든 src 를 합산하면 `localDiag[d]` 는 1-hop 행렬의 d-번째 대각선과 같아진다.
-- 2-hop 누적: (src, mid, dst) 경로. `M_pub²[dst][src] = Σ_k M_pub[dst][k] · M_pub[k][src] = Σ_mid w(mid→dst) · w(src→mid) = Σ_mid w₂ · w₁`. β₂·w₁·w₂ 를 `localDiag[d2][dst]` 에 누적하면, 결국 `localDiag[d]` 는 β₂ · `M_pub²` 의 d-번째 대각선과 같아진다.
+**1-홉 누적.** src 가 `(row + d)` 자리에 대응되고 mid 가 row 자리에 해당하므로,
 
-따라서 정확히는 다음 변환이 이뤄진다.
+$$\mathtt{localDiag}[d_1][\mathtt{mid}] \mathrel{+}= \beta_1 \cdot w_1 = \beta_1 \cdot M_{\mathrm{pub}}[\mathtt{mid}][\mathtt{src}].$$
 
-```
-sparseDiag[d][row] = β₁ · M_pub[row][row+d] + β₂ · M_pub²[row][row+d]   (단, 조건부 가지치기)
-```
+모든 src 에 대한 합산은 1-홉 행렬의 d 번째 대각선과 일치한다.
 
-baseline 은 β₁ = β₂ = 1, 가지치기 없음. A2 와 B 의 기본값은 β₁ = 1.0, β₂ = 0.30, θ = 0.05. *알고리즘 등가성* 만 보고 싶다면 B 를 β₁ = β₂ = 1.0, θ = 0 으로 돌리면 된다 (이게 R1'' 검증 모드 = B-C2 다).
+**2-홉 누적.** (src, mid, dst) 경로에 대해
 
-가지치기의 효과를 구체적으로 보자. 위에서 본 6 년 전 +4 평점의 시간 감쇠 결과는 w₁ ≈ 0.108 로, θ = 0.05 보단 크다. 따라서 그 간선은 2-hop 으로 전파된다. 반대로 9 년 전 +2 평점은 w₁ ≈ 0.5 × 2 = 0.0039 ≈ 0 으로 떨어지므로 2-hop 전파는 중단된다. θ 는 결국 "몇 년 전까지를 신뢰의 다리로 인정할 것인가" 의 정량이다.
+$$M_{\mathrm{pub}}^2[\mathtt{dst}][\mathtt{src}] = \sum_{\mathtt{mid}} M_{\mathrm{pub}}[\mathtt{dst}][\mathtt{mid}] \cdot M_{\mathrm{pub}}[\mathtt{mid}][\mathtt{src}]$$
 
-## 2.6 OpenMP 와 결정적 합산 — B3 + Q4
+가 성립하며, 따라서 β₂ · w₁ · w₂ 를 `localDiag[d₂][dst]` 에 누적한 결과는 β₂ · M_pub² 의 d 번째 대각선이 된다.
 
-위 루프는 src 에 대한 외부 분배가 직관적이지만, 여러 스레드가 `sparseDiag[d][row]` 를 동시에 갱신하면 race 가 생긴다. 통합 브랜치는 thread-local 누적 + thread_id 순서의 sequential reduce 로 처리한다 (`CipherRank.cpp:436–474`).
+이를 통합하면 누적 결과의 정의식은 다음과 같이 표현된다.
+
+$$\mathtt{sparseDiag}[d][\mathtt{row}] = \beta_1 \cdot M_{\mathrm{pub}}[\mathtt{row}][\mathtt{row} + d] + \beta_2 \cdot M_{\mathrm{pub}}^2[\mathtt{row}][\mathtt{row} + d] \quad (\text{단, 조건부 가지치기 하에서}). \tag{2.1}$$
+
+baseline 의 경우 β₁ = β₂ = 1, 가지치기 없음 (θ = 0) 의 특수 케이스에 해당한다. 본 시스템의 기본값은 β₁ = 1.0, β₂ = 0.30, θ = 0.05 이며, 이는 약한 1-홉 (w₁ < θ) 으로부터의 2-홉 전파를 차단함으로써 시간 감쇠가 큰 오래된 간선의 영향력을 추가로 감쇠시키는 역할을 한다.
+
+θ 의 의미는 §2.2 의 시간 감쇠와 결합하여 해석할 때 명확해진다. 약 6 년 전의 +2 평점이 시간 감쇠 후 `2 × 0.5⁶ ≈ 0.03` 으로 떨어지면 θ = 0.05 의 임계값에 못 미쳐 2-홉 전파에서 자동으로 제외된다. 즉 θ 는 "신뢰의 다리로 인정할 거래의 시간 범위" 를 정량적으로 정의하는 파라미터로 작동한다.
+
+## 2.5 결정적 누적 — OpenMP 와 std::map reduce
+
+위 루프는 src 를 외부 축으로 분할하면 자연스럽게 병렬화되지만, 여러 스레드가 동일한 `sparseDiag[d][row]` 항목을 동시에 갱신할 경우 부동소수점 데이터 경합이 발생한다. 본 시스템은 thread-local 누적 후 thread_id 순서의 sequential reduce 를 통해 이를 해결한다 (`CipherRank.cpp:430–469`).
 
 ```cpp
 #pragma omp parallel
@@ -121,32 +94,32 @@ baseline 은 β₁ = β₂ = 1, 가지치기 없음. A2 와 B 의 기본값은 �
     auto& localDiag = tlSparseDiag[tid];
     #pragma omp for schedule(static)
     for (int src = 0; src < nGlobal; src++) {
-        // ... 위 루프
+        // 위 §2.4 의 누적 루프
     }
 }
 
-// thread_id 0..P-1 순서로 std::map 에 합산 → row 오름차순 정렬 보장
-vector<map<int,double>> merged(nGlobal);
+vector<map<int, double>> merged(nGlobal);
 for (int t = 0; t < num_threads; t++)
     for (int d = 0; d < nGlobal; d++)
         for (auto& [row, val] : tlSparseDiag[t][d])
             merged[d][row] += val;
 
-// 0 인 항목 제거 (β₂=0 케이스의 transparent ciphertext 회피)
 for (int d = 0; d < nGlobal; d++)
     for (auto& [row, val] : merged[d])
         if (val != 0.0) sparseDiag[d].emplace_back(row, val);
 ```
 
-세 가지 짚을 점이 있다.
+설계 의도를 세 가지로 정리한다.
 
-1. **결합 순서가 thread_id 순.** 부동소수점 덧셈은 결합법칙을 *완전히* 만족하지 않으므로, 같은 입력에 대해 다른 합산 순서로 같은 결과를 보장하려면 합산 순서 자체를 고정해야 한다. P = 4 든 P = 8 이든 cross-run 결과가 일치해야 R9'' / R11'' 가 의미를 갖는다.
-2. **row 오름차순 정렬.** `std::map` 으로 합산한 결과를 `vector<pair<int,double>>` 로 옮기면 자동으로 row 오름차순이다. 이후 BsgsDiag 인코딩 단계에서 정해진 순서로 슬롯에 기록되므로 동일 입력 → 동일 평문 직렬화가 보장된다.
-3. **val == 0 항목 drop.** β₂ = 0 이면 2-hop 기여가 모두 0 이지만, 누적 자체는 일어나서 `(row, 0.0)` 가 남는다. 이걸 그대로 두면 BsgsDiag 의 plaintext 가 모두 0 이 되고, BSGS 의 `multiply_plain` 결과가 전부 0 인 ciphertext (SEAL 용어로 *transparent*) 가 되어 예외가 던져진다. fix 는 단순히 `val != 0.0` 만 남기는 것으로 충분하다. 자세한 경위는 5절에서 다시 다룬다.
+첫째, 결합 순서가 thread_id 순서로 고정된다. 부동소수점 덧셈이 결합법칙을 완전히 만족하지 않으므로, 동일 입력에 대해 동일 결과를 보장하려면 합산 순서 자체가 결정적이어야 한다. P = 4 든 P = 8 이든 cross-run 결과가 일치해야 §5 의 등가성 검증이 의미를 가진다.
 
-## 2.7 BsgsDiag 와 Q7 패딩
+둘째, `std::map` 을 거치면서 row 가 자동으로 오름차순 정렬된다. 이후 BSGS 인코딩 단계에서 정해진 순서로 슬롯에 기록되므로 동일 입력에 대해 동일한 평문 직렬화가 보장된다.
 
-마지막 단계는 `sparseDiag` 의 대각선 d 를 BSGS 의 baby/giant 분해에 맞춰 `BsgsDiag{i, j, Plaintext}` 로 인코딩하는 일이다 (`CipherRank.cpp:476–500`):
+셋째, `val != 0.0` 가드는 β₂ = 0 의 특수 케이스에서 발생하는 *값이 모두 0 인 비공실 (non-empty) sparseDiag* 를 사전에 제거한다. 이 가드의 부재가 SEAL 의 `result ciphertext is transparent` 예외를 유발하는 경위는 §5.4 에서 별도로 논의한다.
+
+## 2.6 BSGS 대각선 인코딩과 Q7 패딩
+
+`sparseDiag` 의 대각선 d 를 BSGS 의 baby/giant 분해에 맞추어 `BsgsDiag{i, j, Plaintext}` 의 형태로 인코딩하는 절차는 다음과 같다 (`CipherRank.cpp:476–500`).
 
 ```cpp
 for (int j = 0; j < m2; j++) {
@@ -160,36 +133,38 @@ for (int j = 0; j < m2; j++) {
             for (const auto& [row, val] : sparseDiag[d]) {
                 int slot_idx = (row + j * m1) % nGlobal;
                 diag[c * pirBlockSize + slot_idx] = val;
-                diag[c * pirBlockSize + slot_idx + nGlobal] = val;   // Q7 padding
+                diag[c * pirBlockSize + slot_idx + nGlobal] = val;  // Q7 패딩
             }
         }
-        // ... encode + push BsgsDiag
+        // CKKS encode + push BsgsDiag
     }
 }
 ```
 
-d 의 의미는 3절에서 본격적으로 다루지만 골조만 미리 적자: BSGS 는 [0, N) 의 대각선 d 를 `d = j · m₁ + i` 로 쪼개고, baby step i 는 *입력 ciphertext* 쪽에서, giant step j 는 *plain diagonal* 쪽에서 회전을 흡수한다. 그래서 같은 d 의 평문이라도 j 에 따라 *원래 row 가 향해야 할 슬롯 위치* 가 다르다 — 정확히 `slot_idx = (row + j · m₁) mod N` 이다.
+인덱스 분해 `d = j · m₁ + i` 의 의미는 §3.3 에서 본격적으로 다루지만, 본 절에서는 인코딩 단계에서의 효과만 명시한다. baby step i 는 *입력 ciphertext* 측에서 회전을 흡수하고, giant step j 는 *평문 대각선* 측에서 회전을 흡수한다. 따라서 동일한 d 의 평문이라도 j 의 값에 따라 원래 row 가 향해야 할 슬롯 위치가 달라지며, 그 위치는 정확히 `slot_idx = (row + j · m₁) mod N` 으로 결정된다.
 
-`Q7 padding` 은 한 청크의 2N 슬롯 중 뒤쪽 N 슬롯에 앞쪽과 같은 값을 복제해 넣는 트릭이다. 이게 왜 필요한지는 3절의 "청크 경계와 회전 안전" 절에서 본격적으로 풀어쓰지만, 한 줄 요약은 "BSGS giant step 회전이 청크 경계에 걸칠 수 있어, 청크 안쪽으로 wrap-around 한 값이 의도된 값과 정확히 같도록 미리 두 번 적어두는 것"이다.
+**Q7 패딩.** 한 청크의 2N 슬롯 중 뒤쪽 N 슬롯에 앞쪽과 동일한 값을 복제하여 적는 처리이다. 이는 BSGS 의 giant step 회전이 청크 경계에 걸칠 수 있는 상황을 사전에 차단한다. 자세한 안전성 증명은 §3.5 의 C4 보조정리에서 다루며, 한 줄 요약은 "회전 후의 슬롯 분포가 어떻게 변하든 청크 영역 내부에 항상 의도된 값이 존재하도록 사전에 두 번 적어두는 처리" 이다.
 
-빈 대각선 (예: β₂=0 의 영향으로 0 인 항목이 모두 제거되어 vector 가 비는 d) 은 인코딩을 통째로 건너뛴다. 이 경우 그 d 는 BsgsDiag 리스트에 등장하지 않으므로 Phase 3 의 plain mult 단계에서 자연스럽게 빠진다. β₂=0, θ=0 으로 실행하면 N=1024 에서 D_sparse 는 1020 (네 개의 d 가 1-hop 만으로 비어 있음) 으로 나온다.
+`sparseDiag[d]` 가 비어 있는 d 는 인코딩 자체가 건너뛰어지며, 결과적으로 그 d 는 `pirDiagonals` 에 등장하지 않는다. Phase 3 의 평문 곱 단계는 이 빠진 d 를 자연스럽게 스킵하므로, *비공실 대각선의 수* D_sparse 가 BSGS 의 실제 평문 곱 횟수가 된다.
 
-## 2.8 출력의 형상
+## 2.7 출력의 형상
 
-Phase 1 의 최종 두 출력은 다음과 같다.
+Phase 1 의 두 최종 출력은 다음과 같다.
 
-- `outM_pub`: nGlobal 개의 `unordered_map<int, double>` (Q5). row 별로 sparse 표현. Phase 5 가 인덱스 두 개로 random access.
-- `pirDiagonals`: `vector<BsgsDiag>`, 길이는 D_sparse. 각 원소가 baby/giant 인덱스 (i, j) 와 인코딩된 CKKS plaintext 를 들고 있다.
+- `outM_pub` : 길이 N 의 `vector<unordered_map<int, double>>`. 행별 희소 표현으로, Phase 5 의 부분 행렬 추출에서 무작위 접근의 대상이 된다.
+- `pirDiagonals` : 길이 D_sparse 의 `vector<BsgsDiag>`. 각 원소는 baby/giant 인덱스 쌍 (i, j) 과 CKKS 평문을 보유한다.
 
-이 두 출력이 다음 두 단계 (Phase 3 의 PIR, Phase 5 의 PageRank) 의 *전체* 입력 데이터다. 그 외에는 클라이언트 측의 (one-hot 으로 변환될) 평가 대상 인덱스 뿐이다.
+이 두 출력이 Phase 3 의 PIR 과 Phase 5 의 PageRank 의 *전체* 입력이며, 그 외에 외부에서 주입되는 정보는 클라이언트 측의 평가 대상 인덱스뿐이다.
 
-## 2.9 손으로 따라가는 N=4 트레이스
+---
 
-1 절 1.7 의 6 줄짜리 csv 를 들고 Phase 1 의 출력 직전까지 직접 따라간다. 모든 시각이 같다는 가정에서 시간 감쇠가 1.0 이라 raw weight 그대로 살아남는 점만 미리 짚어두자.
+## 부록 2.A — N = 4 예제에 대한 손 계산
 
-### 2.9.1 outAdj 와 outM_pub
+§1.6 의 가상 csv 6 행으로부터 Phase 1 의 산출물을 직접 구성하고, 식 (2.1) 의 정의식과 비교 검증한다. 모든 시각이 동일하다는 가정에서 감쇠 계수가 1.0 으로 고정되므로 raw 가중치가 그대로 보존된다.
 
-`globalNodeToIndex` 적용 후 6 줄이 다음과 같이 변환된다.
+### 2.A.1 인접 리스트와 M_pub
+
+전역 인덱스 매핑 적용 후의 변환은 다음 표와 같다.
 
 | 원본 (src, tgt, w) | (srcIdx, tgtIdx, w) |
 |---|---|
@@ -200,16 +175,16 @@ Phase 1 의 최종 두 출력은 다음과 같다.
 | (40, 10, 3) | (3, 0, 3) |
 | (30, 10, 4) | (1, 0, 4) |
 
-`outAdj[src]` 는 src 에서 나가는 (tgt, w) 의 리스트로 채워진다.
+송신자별 출간선 리스트는 다음과 같이 구성된다.
 
 ```
-outAdj[0] = [(2, 4), (1, 3)]     // wallet 10 의 출간선
-outAdj[1] = [(3, 2), (0, 4)]     // wallet 30
-outAdj[2] = [(1, 5)]             // wallet 20
-outAdj[3] = [(0, 3)]             // wallet 40
+outAdj[0] = [(2, 4), (1, 3)]
+outAdj[1] = [(3, 2), (0, 4)]
+outAdj[2] = [(1, 5)]
+outAdj[3] = [(0, 3)]
 ```
 
-같은 루프에서 누적되는 `outM_pub[tgt][src] += w` 를 4×4 dense 로 그리면 다음이다 (행 = 수신자, 열 = 송신자).
+행 = 수신자, 열 = 송신자의 4 × 4 dense 표기로 옮긴 M_pub 은 다음과 같다.
 
 ```
          src=0  src=1  src=2  src=3
@@ -219,47 +194,39 @@ tgt=2  [   4      0      0      0   ]
 tgt=3  [   0      2      0      0   ]
 ```
 
-이 행렬이 곧 `M_pub`. 열 j 는 "wallet j 가 *내보내는* 신뢰 분포", 행 i 는 "wallet i 가 *받는* 신뢰 분포" 다.
+### 2.A.2 sparseDiag 의 누적
 
-### 2.9.2 sparseDiag 누적 — 정의대로 손으로
-
-β₁ = 1.0, β₂ = 0.3, θ = 0.05 의 기본 모드. 본 예제의 모든 w₁ 이 정수 (≥ 2) 라 θ 가지치기는 단 한 곳에서도 발동하지 않는다.
-
-코드의 이중 루프를 src = 0, 1, 2, 3 순으로 펼친다 (한 스레드로 다 돌렸다 치고 thread-local 분리는 생략).
+β₁ = 1.0, β₂ = 0.3, θ = 0.05 의 기본 모드 하에서 §2.4 의 누적 루프를 src = 0, 1, 2, 3 순으로 펼친다. 본 예제의 모든 w₁ 은 정수 (≥ 2) 이므로 가지치기 조건은 어디서도 발동하지 않는다.
 
 **src = 0 (wallet 10):**
 
-- (mid=2, w₁=4): d₁ = (0 − 2 + 4) % 4 = 2 → `sparseDiag[2][2] += 4`
-  - 2-hop: outAdj[2] = [(1, 5)]. dst=1, w₂=5: d₂ = 3 → `sparseDiag[3][1] += 0.3 · 4 · 5 = 6`
-- (mid=1, w₁=3): d₁ = 3 → `sparseDiag[3][1] += 3` (위와 다른 경로) → 누적 9
-  - 2-hop: outAdj[1] = [(3, 2), (0, 4)]
-    - dst=3, w₂=2: d₂ = 1 → `sparseDiag[1][3] += 0.3 · 3 · 2 = 1.8`
-    - dst=0, w₂=4: d₂ = 0 → `sparseDiag[0][0] += 0.3 · 3 · 4 = 3.6`
+- (mid = 2, w₁ = 4): d₁ = 2. `sparseDiag[2][2] += 4`
+  - 2-홉 (dst = 1, w₂ = 5): d₂ = 3. `sparseDiag[3][1] += 0.3 · 4 · 5 = 6`
+- (mid = 1, w₁ = 3): d₁ = 3. `sparseDiag[3][1] += 3` → 누적 9
+  - 2-홉 (dst = 3, w₂ = 2): d₂ = 1. `sparseDiag[1][3] += 0.3 · 3 · 2 = 1.8`
+  - 2-홉 (dst = 0, w₂ = 4): d₂ = 0. `sparseDiag[0][0] += 0.3 · 3 · 4 = 3.6`
 
 **src = 1 (wallet 30):**
 
-- (mid=3, w₁=2): d₁ = 2 → `sparseDiag[2][3] += 2`
-  - 2-hop: outAdj[3] = [(0, 3)]. dst=0, w₂=3: d₂ = 1 → `sparseDiag[1][0] += 0.3 · 2 · 3 = 1.8`
-- (mid=0, w₁=4): d₁ = 1 → `sparseDiag[1][0] += 4` → 누적 5.8
-  - 2-hop: outAdj[0] = [(2, 4), (1, 3)]
-    - dst=2, w₂=4: d₂ = 3 → `sparseDiag[3][2] += 0.3 · 4 · 4 = 4.8`
-    - dst=1, w₂=3: d₂ = 0 → `sparseDiag[0][1] += 0.3 · 4 · 3 = 3.6`
+- (mid = 3, w₁ = 2): d₁ = 2. `sparseDiag[2][3] += 2`
+  - 2-홉 (dst = 0, w₂ = 3): d₂ = 1. `sparseDiag[1][0] += 0.3 · 2 · 3 = 1.8`
+- (mid = 0, w₁ = 4): d₁ = 1. `sparseDiag[1][0] += 4` → 누적 5.8
+  - 2-홉 (dst = 2, w₂ = 4): d₂ = 3. `sparseDiag[3][2] += 0.3 · 4 · 4 = 4.8`
+  - 2-홉 (dst = 1, w₂ = 3): d₂ = 0. `sparseDiag[0][1] += 0.3 · 4 · 3 = 3.6`
 
 **src = 2 (wallet 20):**
 
-- (mid=1, w₁=5): d₁ = 1 → `sparseDiag[1][1] += 5`
-  - 2-hop: outAdj[1] = [(3, 2), (0, 4)]
-    - dst=3, w₂=2: d₂ = 3 → `sparseDiag[3][3] += 0.3 · 5 · 2 = 3`
-    - dst=0, w₂=4: d₂ = 2 → `sparseDiag[2][0] += 0.3 · 5 · 4 = 6`
+- (mid = 1, w₁ = 5): d₁ = 1. `sparseDiag[1][1] += 5`
+  - 2-홉 (dst = 3, w₂ = 2): d₂ = 3. `sparseDiag[3][3] += 0.3 · 5 · 2 = 3`
+  - 2-홉 (dst = 0, w₂ = 4): d₂ = 2. `sparseDiag[2][0] += 0.3 · 5 · 4 = 6`
 
 **src = 3 (wallet 40):**
 
-- (mid=0, w₁=3): d₁ = 3 → `sparseDiag[3][0] += 3`
-  - 2-hop: outAdj[0] = [(2, 4), (1, 3)]
-    - dst=2, w₂=4: d₂ = 1 → `sparseDiag[1][2] += 0.3 · 3 · 4 = 3.6`
-    - dst=1, w₂=3: d₂ = 2 → `sparseDiag[2][1] += 0.3 · 3 · 3 = 2.7`
+- (mid = 0, w₁ = 3): d₁ = 3. `sparseDiag[3][0] += 3`
+  - 2-홉 (dst = 2, w₂ = 4): d₂ = 1. `sparseDiag[1][2] += 0.3 · 3 · 4 = 3.6`
+  - 2-홉 (dst = 1, w₂ = 3): d₂ = 2. `sparseDiag[2][1] += 0.3 · 3 · 3 = 2.7`
 
-reduce 후 (= 위 누적 그대로) row 오름차순으로 정렬해서 펴면:
+reduce 와 row 오름차순 정렬을 거친 최종 결과는 다음과 같다.
 
 | d | sparseDiag[d] (row : val) |
 |---:|---|
@@ -268,9 +235,9 @@ reduce 후 (= 위 누적 그대로) row 오름차순으로 정렬해서 펴면:
 | 2 | { 0 : 6.0, 1 : 2.7, 2 : 4.0, 3 : 2.0 } |
 | 3 | { 0 : 3.0, 1 : 9.0, 2 : 4.8, 3 : 3.0 } |
 
-### 2.9.3 검산 — M_pub + 0.3 · M_pub² 의 대각선과 비교
+### 2.A.3 정의식과의 비교
 
-위 누적이 *정의대로* 작동하는지 직접 확인한다. M_pub² 의 16 칸을 손으로 계산하면
+식 (2.1) 의 우변에 해당하는 `M_pub + 0.3 · M_pub²` 의 d 번째 대각선을 직접 계산하여 §2.A.2 의 결과와 비교한다. M_pub² 의 16 개 성분은 행렬 곱 정의에 따라 다음과 같이 산출된다.
 
 | | j=0 | j=1 | j=2 | j=3 |
 |---|---:|---:|---:|---:|
@@ -279,9 +246,9 @@ reduce 후 (= 위 누적 그대로) row 오름차순으로 정렬해서 펴면:
 | i=2 | 0 | 16 | 0 | 12 |
 | i=3 | 6 | 0 | 10 | 0 |
 
-(예: M²[0][0] = 0·0 + 4·3 + 0·4 + 3·0 = 12. M²[0][1] = 0·4 + 4·0 + 0·0 + 3·2 = 6. M²[3][2] = 0·0 + 2·5 + 0·0 + 0·0 = 10. 나머지 동일한 방식.)
+(예: M²[0][0] = 0·0 + 4·3 + 0·4 + 3·0 = 12. M²[0][1] = 0·4 + 4·0 + 0·0 + 3·2 = 6.)
 
-M_total = M_pub + 0.3 · M²:
+따라서 M_total = M_pub + 0.3 · M_pub² 는
 
 ```
 [ 3.6   5.8   6.0   3.0 ]
@@ -290,18 +257,18 @@ M_total = M_pub + 0.3 · M²:
 [ 1.8   2.0   3.0   0.0 ]
 ```
 
-d 번째 대각선 = `M_total[row][(row + d) mod 4]`:
+이며, d 번째 대각선 `M_total[row][(row + d) mod 4]` 는 다음과 같이 정리된다.
 
-- d = 0: (3.6, 3.6, 0, 0) — 0 이 아닌 것만 남기면 `{0: 3.6, 1: 3.6}`. **위 sparseDiag[0] 과 일치.** ✓
-- d = 1: (5.8, 5.0, 3.6, 1.8). **sparseDiag[1] 과 일치.** ✓
-- d = 2: (6.0, 2.7, 4.0, 2.0). **sparseDiag[2] 과 일치.** ✓
-- d = 3: (3.0, 9.0, 4.8, 3.0). **sparseDiag[3] 과 일치.** ✓
+- d = 0: (3.6, 3.6, 0, 0) — 비영 항만 남기면 {0: 3.6, 1: 3.6}. **§2.A.2 의 sparseDiag[0] 과 일치한다.**
+- d = 1: (5.8, 5.0, 3.6, 1.8). **sparseDiag[1] 과 일치한다.**
+- d = 2: (6.0, 2.7, 4.0, 2.0). **sparseDiag[2] 와 일치한다.**
+- d = 3: (3.0, 9.0, 4.8, 3.0). **sparseDiag[3] 과 일치한다.**
 
-전부 소수점 한 자리까지 정확히 일치한다 — *알고리즘이 정의한 변환이 그대로 코드에 옮겨졌다는 한 줄 증명이다.* N³ 의 dense 곱을 굳이 하지 않고 outAdj 위에서 같은 결과를 얻을 수 있는 이유의 시각적 확인이기도 하다.
+모든 항이 소수점 한 자리까지 정확히 일치한다. 이로써 식 (2.1) 의 정의가 본 시스템의 코드에 누락 없이 옮겨졌음이 확인된다.
 
-### 2.9.4 BsgsDiag 인코딩과 Q7 패딩
+### 2.A.4 BsgsDiag 의 슬롯 분포
 
-N = 4 에서 BSGS 의 최적해는 m₁ = m₂ = 2 (`FindOptimalAsymmetricBSGS(4, 1.0)` 의 반환). 그러면 d 가 (j, i) 로 다음과 같이 쪼개진다.
+N = 4 의 경우 `FindOptimalAsymmetricBSGS(4, 1.0)` 의 반환은 m₁ = m₂ = 2 이며, d 의 분해는 다음과 같다.
 
 | d | j (giant) | i (baby) |
 |---:|---:|---:|
@@ -310,27 +277,11 @@ N = 4 에서 BSGS 의 최적해는 m₁ = m₂ = 2 (`FindOptimalAsymmetricBSGS(4
 | 2 | 1 | 0 |
 | 3 | 1 | 1 |
 
-청크 하나, batch_size = 1, slot_count = 8 (= 2N) 의 단순 가정 하에 각 BsgsDiag 의 평문은 8 슬롯짜리 vector 다. 슬롯 위치는 `slot_idx = (row + j · m₁) mod N = (row + 2j) mod 4` 에 sparseDiag[d] 의 row→val 을 기록하고, **Q7 패딩** 으로 같은 위치 + N 에도 같은 값을 적는다.
+청크 하나, batch_size = 1, slot_count = 2N = 8 의 가정 하에서 각 BsgsDiag 의 평문 슬롯 벡터는 다음과 같이 채워진다 (`slot_idx = (row + 2j) mod 4` 위치와 그 +N 위치).
 
-(j=0, i=0) — d = 0, sparseDiag[0] = {0: 3.6, 1: 3.6}:
+- (j = 0, i = 0), d = 0: `[3.6, 3.6, 0, 0, 3.6, 3.6, 0, 0]`
+- (j = 0, i = 1), d = 1: `[5.8, 5.0, 3.6, 1.8, 5.8, 5.0, 3.6, 1.8]`
+- (j = 1, i = 0), d = 2: `[4.0, 2.0, 6.0, 2.7, 4.0, 2.0, 6.0, 2.7]`
+- (j = 1, i = 1), d = 3: `[4.8, 3.0, 3.0, 9.0, 4.8, 3.0, 3.0, 9.0]`
 
-- row=0 → slot 0 ← 3.6, slot 0+4=4 에도 3.6
-- row=1 → slot 1, 5 에 3.6
-- vector: `[3.6, 3.6, 0, 0, 3.6, 3.6, 0, 0]`
-
-(j=0, i=1) — d = 1, sparseDiag[1] = {0: 5.8, 1: 5.0, 2: 3.6, 3: 1.8}:
-
-- slot_idx 가 row 그대로
-- vector: `[5.8, 5.0, 3.6, 1.8, 5.8, 5.0, 3.6, 1.8]`
-
-(j=1, i=0) — d = 2, sparseDiag[2] = {0: 6.0, 1: 2.7, 2: 4.0, 3: 2.0}:
-
-- slot_idx = (row + 2) mod 4. row=0→2, row=1→3, row=2→0, row=3→1
-- vector: `[4.0, 2.0, 6.0, 2.7, 4.0, 2.0, 6.0, 2.7]`
-
-(j=1, i=1) — d = 3, sparseDiag[3] = {0: 3.0, 1: 9.0, 2: 4.8, 3: 3.0}:
-
-- slot_idx = (row + 2) mod 4 동일 매핑
-- vector: `[4.8, 3.0, 3.0, 9.0, 4.8, 3.0, 3.0, 9.0]`
-
-이 네 vector 가 CKKS encode → `pirDiagonals` 의 네 BsgsDiag `{(i=0, j=0), (i=1, j=0), (i=0, j=1), (i=1, j=1)}` 로 캐싱된다. **D_sparse = 4 = N** 이라 sparsity = 0. 작은 그래프이고 모든 d 가 값이 0 이 아닌 entry 를 가져서 그렇다 — 실제 BitcoinOTC 에선 D_sparse 가 N 보다 작다. 3 절 3.9 에서 이 네 평문을 one-hot 과 BSGS 로 곱한다.
+D_sparse = 4 = N 이므로 본 예제의 sparsity 는 0 이다. 이는 본 예제의 그래프가 작고 모든 d 가 비영 항을 보유하기 때문이며, 실제 BitcoinOTC 의 경우 D_sparse < N 으로 일정 비율의 sparsity 가 확보된다. 위 네 평문 벡터는 §3.A 의 BSGS 곱셈에서 one-hot 암호문과 결합된다.

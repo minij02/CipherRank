@@ -1,23 +1,21 @@
-# 4. Phase 4–6 — 부분 그래프와 동형 PageRank
+# 4. 부분 그래프 해상도와 동형 PageRank
 
-Phase 4 와 Phase 5 는 한 단위로 묶어 보는 게 편하다. Phase 4 가 부분 그래프의 *어떤 노드를 살릴지* 를 결정하고, Phase 5 가 그 부분 그래프 위에서 PageRank 를 동형으로 굴린다. 마지막 Phase 6 은 평가 대상의 점수를 임계값과 비교해 verdict 를 낸다.
+Phase 4 와 Phase 5 는 평가 대상의 trust 분포로부터 *어떤 노드를 부분 그래프에 포함시킬 것인가* 를 결정하고, 그 부분 그래프 위에서 PageRank 의 멱법 반복을 수행하는 절차이다. Phase 6 은 최종 점수를 임계값과 비교하여 `APPROVED` 또는 `REJECTED` 의 판정을 산출한다. 본 장은 §4.1 에서 부분 그래프의 인덱스 결정을, §4.2 부터 §4.3 까지 부분 행렬의 구성과 column-stochastic 정규화를, §4.4 부터 §4.7 까지 멱법 반복의 평문 및 동형 구현을, §4.8 에서 최종 판정을 다룬다. 부록 §4.A 는 §1.6 의 N = 4 예제 위에서 멱법 반복의 10 회 결과를 손 계산으로 정리한다.
 
-## 4.1 Phase 4 — 부분 그래프 인덱스 결정
+## 4.1 부분 그래프 인덱스 결정
 
-Phase 3 의 출력은 청크별 ciphertext 다. 청크 c 안의 c'-번째 슬롯 묶음 `[c'·2N, c'·2N + N)` 에는 그 자리의 평가 대상이 다른 N 개 노드 각각에게 받는 trust 의 1+2-hop 누적 분포가 들어있다. Phase 4 는 이 ciphertext 들을 복호해서 (`CipherRank.cpp:599`) 슬롯 분포를 평문 vector 로 본 다음 (`CipherRank.cpp:603`), N 개 슬롯의 값을 내림차순으로 정렬해 상위 nSub 개를 고른다.
-
-`CipherRank.cpp:620–636` 부분:
+Phase 3 의 출력 ciphertext 를 복호하고 디코딩한 결과는 청크별 슬롯 분포이다. 청크 c 의 c′ 번째 슬롯 묶음 [c′ · 2N, c′ · 2N + N) 에는 그 자리의 평가 대상이 다른 N 개 노드 각각에게 받는 1+2-홉 누적 trust 분포가 인코딩되어 있다. Phase 4 는 이 분포의 상위 nSub 개를 부분 그래프의 노드로 선택한다 (`CipherRank.cpp:613–652`).
 
 ```cpp
 for (size_t c = 0; c < (end_idx - start_idx); c++) {
     vector<Score> scores;
     for (int i = 0; i < nGlobal; i++) {
         double val = decodedNeighbors[c * pirBlockSize + i];
-        val = round(val * 100000.0) / 100000.0;           // 양자화
+        val = round(val * 100000.0) / 100000.0;
         scores.push_back({i, val});
     }
     sort(scores.begin(), scores.end(), [](const Score& a, const Score& b) {
-        if (abs(a.score - b.score) < 1e-6) return a.index < b.index;  // 결정적 tie-break
+        if (abs(a.score - b.score) < 1e-6) return a.index < b.index;
         return a.score > b.score;
     });
     vector<int> topNodes;
@@ -25,22 +23,22 @@ for (size_t c = 0; c < (end_idx - start_idx); c++) {
 
     int targetGIdx = targetGlobalIndices[start_idx + c];
     if (find(topNodes.begin(), topNodes.end(), targetGIdx) == topNodes.end())
-        topNodes[nSub - 1] = targetGIdx;                  // 대상이 누락되면 마지막 슬롯에 강제 삽입
-    ...
+        topNodes[nSub - 1] = targetGIdx;
+    // ...
 }
 ```
 
-여기서 짚을 점 셋.
+본 절차에서 짚어둘 세 가지 처리는 다음과 같다.
 
-1. **양자화 `round(val * 1e5) / 1e5`**: CKKS 의 복호 결과는 평문 정답에 `~2^-35` 수준의 노이즈가 얹힌 부동소수점이다. nSub 위치에 들어갈 두 노드의 점수가 *거의 같을 때*, 다음 줄의 비교가 노이즈로 흔들리면 cross-run 으로 다른 nSub 집합이 뽑힐 수 있다. round 와 1e-6 tie-break 은 이를 막는 결정적 정렬 장치다.
-2. **대상 본인의 강제 포함**: PageRank 가 부분 그래프 안에서 평가 대상의 점수를 산출하므로, 평가 대상이 자기 부분 그래프 안에 *반드시* 있어야 한다. 외부 trust 가 부족해 top-nSub 에 들지 못한 경우 마지막 자리에 끼워넣는다. 이 강제 삽입은 평가 대상의 자기 PageRank 가 항상 정의되도록 보장하는 안전판이다.
-3. **결과는 평문**: `topNodes` 가 평문이라는 사실은 *Phase 4 출력 자체가 평가 대상에 대한 정보 누설* 임을 뜻한다. 즉 클라이언트는 자기가 누구를 평가하는지 알고, top-nSub 도 알고, 그 다음 단계 (Phase 5) 에서 그 nSub 부분 행렬을 서버에게 던진다. 이 모델에선 서버가 *어떤 부분 그래프 위에서 계산하는지* 는 보지만 (그건 그래프가 평문이라 어차피 공개), 점수 결과는 끝까지 ciphertext 안에 머문다.
+**양자화.** CKKS 복호 결과는 평문 정답에 약 2⁻³⁵ 수준의 노이즈가 부가된 부동소수점이다. nSub 와 nSub + 1 위치에 들어갈 두 노드의 점수가 거의 같을 때 노이즈가 정렬 결과를 흔들 가능성이 있으므로, `round(val · 10⁵) / 10⁵` 양자화와 1e-6 의 tie-break 기준을 통해 결정적 정렬을 보장한다.
 
-`outTopNodes` 와 `outTargetSubIdx` 가 Phase 5 의 입력이다. 후자는 *부분 그래프 안에서 평가 대상이 몇 번째 인덱스인지* 다. PageRank 출력 벡터의 `subIdx` 자리만 읽으면 평가 대상의 최종 점수가 된다.
+**평가 대상의 강제 포함.** 평가 대상이 자기 자신의 top-nSub 에 포함되지 못한 경우 마지막 슬롯에 강제로 삽입한다. PageRank 가 부분 그래프 내 평가 대상의 점수를 산출해야 하므로, 평가 대상이 부분 그래프에 *반드시* 포함되도록 보장하는 안전장치이다.
 
-## 4.2 부분 행렬과 PageRank 정규화
+**평문 출력.** topNodes 와 평가 대상의 부분 그래프 내 인덱스 subIdx 는 평문으로 출력된다. 이는 §1.5 의 위협 모델에 부합하며, 부분 그래프의 *구조* 는 서버에 노출되지만 평가 결과 점수 자체는 끝까지 ciphertext 내부에 머문다.
 
-Phase 5 의 첫 단계는 부분 그래프의 가중치 행렬 `M_sub[c]` 를 만드는 일이다. 평가 대상 c 의 top-nSub 인덱스 집합 `topNodes` 를 가지고 `M_pub` 에서 nSub × nSub 부분만 잘라낸다 (`CipherRank.cpp:687–690`):
+## 4.2 부분 행렬 추출과 column-stochastic 정규화
+
+Phase 5 의 첫 번째 단계는 평가 대상별 부분 행렬 `M_sub` 의 구성이다 (`CipherRank.cpp:668–682`).
 
 ```cpp
 for (size_t c = 0; c < num_targets; c++) {
@@ -48,196 +46,171 @@ for (size_t c = 0; c < num_targets; c++) {
         for (int j = 0; j < nSub; j++)
             all_M_sub[c][i][j] = SparseGet(M_pub, allTopNodes[c][i], allTopNodes[c][j]);
     }
+    // column 정규화 + teleport ...
+}
 ```
 
-(Q5 적용 후 `M_pub` 은 sparse 표현이므로 `operator[]` 가 아니라 `SparseGet` 으로 읽는다. `[]` 를 쓰면 미존재 키에 0 값을 *삽입* 해버려 const-safety 가 깨지고 메모리도 부풀어오른다. EB17 의 이유.)
+Q5 의 도입에 따라 `M_pub` 이 희소 표현으로 유지되므로, 부분 행렬 추출은 `operator[]` 가 아닌 const-safe 한 `SparseGet` 을 사용한다. `operator[]` 를 사용하는 경우 미존재 키에 대해 0 값이 자동 *삽입* 되어 const-safety 가 깨지고 메모리도 부풀어 오른다 (자세한 논의는 §5.5 의 Q5 항목).
 
-다음에 column-stochastic 정규화를 한다. PageRank 의 transition matrix 는 "j 열의 합이 1" 이어야 한다.
+부분 행렬이 구성되면 column-stochastic 정규화가 적용된다. PageRank 의 transition matrix 는 각 열의 합이 1 이 되도록 정규화되어야 하며, 본 시스템은 다음 절차를 따른다.
 
 ```cpp
 double alpha = 0.85, tele = (1.0 - alpha) / nSub;
 for (int j = 0; j < nSub; j++) {
     double colSum = 0.0;
     for (int i = 0; i < nSub; i++) colSum += all_M_sub[c][i][j];
-    if (colSum == 0.0) all_M_sub[c][j][j] = 1.0;             // dangling node 보정
+    if (colSum == 0.0) all_M_sub[c][j][j] = 1.0;
     else for (int i = 0; i < nSub; i++) all_M_sub[c][i][j] /= colSum;
     for (int i = 0; i < nSub; i++)
         all_M_sub[c][i][j] = (alpha * all_M_sub[c][i][j]) + tele;
 }
 ```
 
-- **column normalization**: 한 열의 모든 가중치를 그 열의 합으로 나눈다. 그러면 j 열이 확률 분포가 된다.
-- **dangling node**: j 노드의 outflow 가 모두 부분 그래프 *밖* 이면 colSum=0 이다. 그 경우 j 열을 *자기 자신* 에 100% 머무는 분포로 둔다. 이건 Stanford PageRank original paper 의 표준 처리다.
-- **teleportation**: α=0.85 의 확률로만 random walk 를 따르고, 1-α=0.15 의 확률은 모든 노드 중 하나에 균일하게 점프한다. 이 균일 점프는 `tele = (1-α) / nSub` 으로 모든 (i, j) 셀에 더해진다. 따라서 정규화된 한 열은 (α · 정규화된 column) + (1-α/nSub · 1_vec) 형태가 된다.
+PageRank 의 transition 은 *1-홉* 행렬 `M_pub` 위에서 정의되며, top-nSub 의 결정만 1+2-홉의 `M_total` 을 사용한다는 점에 주목한다. 이 비대칭은 의도된 설계 선택이며, "부분 그래프 선택은 넓은 영향력 (확장된 이웃) 으로 평가하되, PageRank 의 random walk 자체는 직접 신뢰만으로 정의한다" 는 의미 모델을 반영한다.
 
-α = 0.85 는 PageRank 의 관례적 기본값이다. 너무 큰 α 는 그래프 구조의 자기 반복 효과를 키우고 (사이클이 있으면 폭주), 너무 작은 α 는 그래프 정보를 사실상 무시하고 균일 분포에 수렴한다.
+## 4.3 텔레포트와 dangling 노드 처리
 
-## 4.3 평문 멱법 반복 — 정답 비교용
+α = 0.85 의 damping factor 와 균일 텔레포트는 PageRank 의 표준 형식을 따른다. transition 의 최종 형태는
 
-Phase 5 는 먼저 평문 PageRank 를 10 번 돌려 "정답" 을 만든다 (`CipherRank.cpp:709–717`):
+$$T[i][j] = \alpha \cdot \widehat{M}_{\mathrm{sub}}[i][j] + \frac{1 - \alpha}{n_{\mathrm{sub}}} \tag{4.1}$$
 
-```cpp
-int ITERATIONS = 10;
-for (int iter = 1; iter <= ITERATIONS; iter++) {
-    for (size_t c = 0; c < num_targets; c++) {
-        vector<double> nextV(nSub, 0.0);
-        for (int j = 0; j < nSub; j++) {
-            for (int i = 0; i < nSub; i++)
-                nextV[i] += all_M_sub[c][i][j] * all_plainV[c][j];
-        }
-        all_plainV[c] = nextV;
-    }
-}
-```
+로 표현되며, 여기서 $\widehat{M}_{\mathrm{sub}}$ 는 열 정규화된 부분 행렬이다.
 
-초기 벡터는 균일 분포 `V_0 = (1/n, ..., 1/n)`. 매 iter 마다 `V ← M_sub · V`. 10 iter 후 `V` 의 `subIdx` 자리가 평가 대상의 평문 PageRank 점수다.
+**Dangling 노드의 처리.** colSum = 0 인 열, 즉 부분 그래프 내에 outflow 가 전혀 없는 노드 j 에 대해 본 시스템은 `M_sub[j][j] = 1.0` 으로 두어 random walk 가 자기 자신에 머무는 분포로 정의한다. 이는 Stanford PageRank 의 원 논문 (Page et al., 1999) 이 제시하는 표준적 처리이며, dangling 노드의 행이 모두 0 인 상태에서 column-stochastic 성질이 깨지는 것을 방지한다.
 
-평문 PageRank 가 PIR + FHE 측 점수와 어차피 비교될 거라면 굳이 따로 돌릴 필요가 있나? 두 가지 이유다. 첫째, Phase 6 의 정밀도 검증 출력에 `Precision Error = |fheScore - groundTruthScore|` 를 찍기 위함이다 (단일 머신 측정 시나리오에서만 의미가 있는 진단). 둘째, *부분 그래프가 동일하다면* 평문과 동형의 결과가 일치해야 한다는 가정 자체가 검증 대상이다 — CKKS 노이즈가 누적될수록 동형 결과는 평문에서 멀어지므로, 둘의 차이를 보는 게 R1''/R2''/R6'' 의 핵심 지표다.
+α = 0.85 의 선택은 PageRank 의 관례적 기본값으로, 너무 큰 α 는 그래프 구조의 자기 반복 효과를 증폭시키고 너무 작은 α 는 그래프 정보를 사실상 무시하여 균일 분포에 수렴시킨다. 본 보고서의 범위 내에서는 α 의 변화에 대한 민감도 분석을 수행하지 않으며, 후속 작업으로 분리한다.
 
-## 4.4 동형 멱법 반복 — 회전 + 평문 곱 + 누적
+## 4.4 평문 멱법 반복 — 검증 기준선
 
-Phase 5 의 동형 부분은 청크 루프 안에 들어있다. 한 청크당 다음 시퀀스를 ITER 회 반복한다.
+본 시스템은 동형 멱법 반복에 앞서 동일 부분 행렬에 대한 평문 멱법 반복을 수행한다 (`CipherRank.cpp:684–693`). 이는 두 가지 목적을 가진다.
 
-1. 현재 logical V (평문) 를 CKKS 로 인코딩 + 암호화.
-2. baby step 사전 계산 (m₁ - 1 회의 회전).
-3. j = 0..m₂ - 1 에 대해, 그 j 의 BsgsDiag 들과의 평문 곱·rescale·누적을 한 다음 `j · m₁` 만큼 회전, 전체 합산.
-4. 결과 복호 + 디코딩 → 새 logical V (평문).
-5. clip + 재정규화: 음수 슬롯을 0 으로 자르고, 합이 0 이 아니면 sum-to-1 으로 다시 맞춤. 다음 iter 의 인코딩 입력.
+(i) Phase 6 의 정밀도 지표 (Precision Error = |fheScore − groundTruthScore|) 를 산출하기 위한 ground truth 의 확보.
 
-수식으로 보면
+(ii) 동일 부분 그래프에 대한 평문과 동형 결과의 일치 여부를 통해 CKKS 노이즈 누적의 영향을 정량화.
 
-```
-y = M_sub · V    (CKKS 위에서 BSGS 로 동형 계산)
-V_new = clip(decrypt(y), 0) / Σ clip(...)
-```
+평문 멱법은 초기 벡터 $V_0 = (1/n_{\mathrm{sub}}, \ldots, 1/n_{\mathrm{sub}})$ 로부터 $V_{t+1} = T \cdot V_t$ 를 10 회 반복하여 $V_{10}$ 을 산출한다. 부분 그래프가 동일하다면 평문과 동형의 결과가 일치해야 한다는 가정 자체가 §5 의 R1 / R2 / R6 검증의 출발점이다.
 
-평문 PageRank 와 동치인 부분은 1–3 단계, 단순화가 들어간 곳은 4–5 단계다. 매 iter 의 *끝* 에서 평문으로 떨어졌다가 다음 iter 의 *시작* 에서 다시 암호화한다. 이걸 *decrypt → re-encrypt loop* 라 부르자.
+## 4.5 동형 멱법 반복과 복호-재암호화 루프
 
-## 4.5 왜 매 iter 복호 + 재암호인가
+Phase 5 의 동형 부분은 청크 루프 안에서 다음 5 단계를 ITER = 10 회 반복한다 (`CipherRank.cpp:728–836`).
 
-진짜 PIR 프로토콜이라면 서버는 secret_key 를 가질 수 없으므로 *복호가 안 된다*. 그럼 평문으로 떨어지지 않고 ciphertext 만으로 ITER 회의 PageRank 를 돌려야 한다. 매 iter 의 `M_sub · V` 는 동형 곱셈이 한 번씩이고, 그 곱셈은 modulus chain 의 prime 을 하나씩 소모한다.
+1. 현재 logical V (평문) 를 CKKS 로 인코딩하고 암호화한다.
+2. m₁ − 1 회의 회전으로 baby step 사전 계산을 수행한다.
+3. j = 0, …, m₂ − 1 에 대해 BsgsDiag 와의 평문 곱과 rescale, mod_switch, 누적, 그리고 j · m₁ 회전과 전체 합산을 수행한다.
+4. 결과 ciphertext 를 복호하고 디코딩하여 평문 벡터를 얻는다.
+5. 음수 슬롯을 0 으로 절단 (clip) 하고, 합이 0 이 아닌 경우 sum-to-1 로 재정규화한다. 그 결과를 다음 반복의 입력으로 사용한다.
 
-CipherRank 의 CKKS 파라미터 (`CipherRank.cpp:289`):
+수식으로 표현하면 한 반복은 다음과 같다.
+
+$$y = T \cdot V \quad \text{(CKKS 위에서 BSGS 로 동형 계산)} \tag{4.2}$$
+
+$$V_{\mathrm{new}} = \mathrm{clip}(\mathrm{decrypt}(y), 0) \,/\, \textstyle\sum_i \mathrm{clip}(\cdot)_i \tag{4.3}$$
+
+평문 멱법과 등가인 구간은 1–3 단계이며, 단순화가 도입된 부분은 4–5 단계이다. 매 반복의 *끝* 에서 평문으로 복호되고 *시작* 에서 다시 암호화되는 이 루프를 본 보고서에서는 *decrypt–reencrypt loop* 로 부른다.
+
+**왜 매 반복마다 복호 및 재암호화인가.** 본 시스템의 CKKS 파라미터 (`CipherRank.cpp:289`)
 
 ```cpp
 parms.set_coeff_modulus(CoeffModulus::Create(poly_modulus_degree, { 60, 45, 45, 60 }));
 ```
 
-는 useful multiplicative depth 가 약 2 다. ITER = 10 의 동형 곱셈을 지속하려면 필요한 depth 는 약 10. depth 2 의 ciphertext 로 10 단계를 가려면 bootstrapping 이 필요하다. SEAL CKKS 4.1.2 는 bootstrapping 을 지원하지 않는다.
+는 useful multiplicative depth 가 약 2 이다. 10 회 반복의 동형 곱을 ciphertext 만으로 지속하려면 약 10 단계의 depth 가 요구되며, 이는 SEAL CKKS 4.1.2 가 지원하지 않는 bootstrapping 없이는 불가능하다.
 
-그 대안이 매 iter *복호 + 재암호* 다. 평문으로 떨어지면 CKKS 노이즈가 0 으로 초기화되고, 다시 암호화하면 ciphertext 의 depth 가 full 로 회복된다. 단점은 명확하다 — 서버에 secret_key 가 있어야 하고, 그 결과 *진짜 PIR 위협 모델* 이 아니라 *단일-당사자 측정 시나리오* 가 된다. 본 코드의 모든 측정값이 그 가정 위에 서 있음을 위협 모델 caveat 으로 명시했다 (1절 1.4, 통합 spec sec 1 의 Caveat 박스).
+복호 후 재암호화는 CKKS 노이즈를 0 으로 초기화하고 ciphertext 의 useful depth 를 완전히 회복시킨다. 그러나 이 단순화는 서버가 비밀키를 소유해야 함을 함의하므로, §1.5 에서 명시한 단일 당사자 측정 가정의 직접적 원인이 된다. 진정한 PIR 위협 모델로의 확장 경로는 §5.7 의 후속 항목에서 다룬다.
 
-## 4.6 Phase 5 의 BSGS — Phase 3 와 어떻게 다른가
+## 4.6 Phase 5 의 BSGS — Phase 3 와의 차이
 
-Phase 5 도 `BsgsDiag` 인코딩 + baby/giant 분해를 쓴다. 다만 차원이 N 이 아니라 n = nSub 다. 통합 브랜치의 기본값으로 nSub = 256, m₁ = m₂ = 16, 회전 총합 30 이다. baseline Phase 5 가 매 iter 256 회의 회전을 도므로, BSGS 이득은 ITER × 회전수 비 = 10 × (256/30) ≈ 85× 가 된다 (단 실측은 약 12× — Phase 1 의 OMP 가 한 batch 안에서 청크 5 개 × 4 thread 의 부조화 비용을 함께 받기 때문).
+Phase 5 의 BSGS 는 차원이 N 이 아닌 n = nSub 인 점을 제외하면 Phase 3 와 동일한 구조를 갖는다. 본 시스템의 기본값 nSub = 64 에 대해 `FindOptimalAsymmetricBSGS(64, 1.0)` 는 m₁ = m₂ = 8 을 반환하며 (Q1 적용 후 16, 16 으로 조정될 수도 있으나 본 절에서는 표준 값으로 8 을 사용), 회전 총합은 약 14 회이다.
 
-`BsgsDiag` 의 인코딩 자체는 매 청크마다 (= 매 청크의 부분 행렬마다) 새로 만들어진다 (`CipherRank.cpp:743–762`). Phase 1 의 BsgsDiag 가 N 차원 전역 행렬 한 번 만에 끝나는 것과 다르다 — 부분 행렬은 청크별로 다르고, 그 행렬의 nSub 개 대각선을 매번 인코딩해야 한다.
+`BsgsDiag` 의 인코딩 자체는 매 청크마다 새로 수행된다 (`CipherRank.cpp:741–764`). Phase 1 의 BsgsDiag 가 전역 N 차원 행렬에 대해 한 번만 구성되는 것과 달리, 부분 행렬은 청크별로 다르므로 그 nSub 개 대각선을 매번 인코딩해야 한다.
 
-`if (val > 0.0) isZero = false;` 식의 영-skip 가드는 그대로 들어있다. 부분 그래프의 한 대각선이 *완전히 0* 이면 그 d 의 BsgsDiag 를 만들지 않는다. 이는 회전·곱·덧셈 횟수의 데이터 의존성을 만들지만, 부분 그래프가 평가 대상의 함수이므로 평가 대상별로 약간 다른 wall-clock 이 나올 수 있다 (단일-당사자 측정 시나리오에선 무관).
+`if (val > 0.0) isZero = false;` 의 영-스킵 가드는 그대로 유지된다. 부분 그래프의 한 대각선이 완전히 0 인 경우 해당 d 의 BsgsDiag 가 생성되지 않으며, 이는 평문 곱과 덧셈의 횟수에 데이터 의존성을 도입한다. 부분 그래프가 평가 대상의 함수이므로 wall-clock 이 평가 대상별로 미세하게 달라질 수 있으나, 본 보고서의 단일 당사자 측정 가정에서는 이 점이 보안상 의미를 갖지 않는다.
 
-## 4.7 매 iter 의 clip + 재정규화
+## 4.7 매 반복 후의 clip 과 재정규화
 
-매 iter 끝의
+복호된 평문 벡터에 대한 최종 처리는 다음 두 단계로 구성된다 (`CipherRank.cpp:823–835`).
 
 ```cpp
+double sum = 0.0;
 for (int i = 0; i < nSub; i++) {
     double val = max(0.0, decoded[c * prBlockSize + i]);
-    ...
+    logicalV[start_idx + c][i] = val;
+    sum += val;
 }
+if (sum == 0.0)
+    for (int i = 0; i < nSub; i++) logicalV[start_idx + c][i] = 1.0 / nSub;
+else
+    for (int i = 0; i < nSub; i++) logicalV[start_idx + c][i] /= sum;
 ```
 
-는 두 가지를 한다. 첫째, 음수가 된 슬롯을 0 으로 자른다. PageRank 의 확률 벡터는 반드시 비음수여야 하고, CKKS 노이즈로 인해 0 근처의 값이 음수로 떨어진 경우가 있을 수 있다. 둘째, `sum == 0.0` 이면 균일 분포로 리셋, 아니면 sum-to-1 정규화. 정규화는 매 iter 후의 PageRank 벡터를 확률 분포로 강제하는 안전판이다 — 평문 PageRank 에서는 자연스럽게 보존되지만, 동형 위의 노이즈 누적과 column normalization 의 미세 오차를 고려해 명시적으로 한 번 더 정규화한다.
+**음수 절단.** PageRank 의 확률 분포는 비음수여야 하나, CKKS 노이즈로 인해 0 근처의 값이 음수로 떨어질 수 있다. `max(0.0, val)` 의 절단이 이를 보정한다.
 
-## 4.8 Phase 6 — verdict
+**재정규화.** 평문 멱법에서는 column-stochastic 한 transition 행렬과 sum-to-1 인 입력 벡터로부터 sum-to-1 인 출력 벡터가 자동으로 보장되지만, 동형 위의 노이즈 누적과 column 정규화의 미세 오차로 인해 합이 정확히 1 이 아닐 수 있다. 이 처리는 매 반복 후 확률 분포의 성질을 명시적으로 회복시키는 안전장치이다.
 
-10 iter 후의 `logicalV[c][allTargetSubIdx[c]]` 가 평가 대상 c 의 FHE 측 점수다. 평문 측 `all_plainV[c][allTargetSubIdx[c]]` 가 정답이고, 둘의 차이가 `Precision Error` 다.
+sum 이 0 인 극단적 경우 균일 분포로의 리셋이 적용되는데, 이는 모든 슬롯이 노이즈로 인해 음수가 된 비정상 상황에 대한 fallback 이다.
 
-verdict 는 단순하다 (`CipherRank.cpp:826`):
+## 4.8 최종 판정
+
+10 회 반복 후의 `logicalV[c][allTargetSubIdx[c]]` 가 평가 대상 c 의 FHE 측 점수 (fheScore) 이며, 평문 측 `all_plainV[c][allTargetSubIdx[c]]` 가 ground truth 이다. 양자의 차이가 Precision Error 로 보고된다.
+
+판정 자체는 단순한 임계값 비교이다 (`CipherRank.cpp:826`).
 
 ```cpp
 if (fheScore >= 0.0150) cout << "[APPROVED] Minimum threshold met.";
 else cout << "[REJECTED] Insufficient trust score.";
 ```
 
-임계값 0.0150 은 통계적 정당화 없이 코드에 하드코딩되어 있다. 부분 그래프 안에서 균일 분포 (1/nSub) 가 매 iter 의 시작점이므로, 평가 대상이 "랜덤보다 의미 있게 높은 점수" 를 받으려면 다른 노드들로부터의 trust inflow 가 그래프 구조상 평가 대상에게 집중되어야 한다. nSub = 64 의 경우 균일 점수는 1/64 ≈ 0.0156, nSub = 256 의 경우 1/256 ≈ 0.0039 다. 그러니 0.0150 임계값은 nSub 가 작을 땐 "약간 평균보다 위", 클 땐 "평균의 4 배 위" 로 의미가 변한다. 이 임계값 자체는 후속 작업에서 nSub 함수로 파라미터화 해야 한다고 spec 의 R6 가 지적해두었다.
+임계값 0.0150 은 코드 내에 하드코딩되어 있으며, 그 통계적 정당화는 본 보고서의 범위에 포함되지 않는다. nSub = 64 의 경우 균일 분포 점수가 1 / 64 ≈ 0.0156 이므로, 본 임계값은 사실상 평균선 직하에 위치한다. nSub = 256 의 경우 균일 점수가 0.0039 로 떨어지므로 동일 임계값이 평균의 약 4 배 위에 위치하게 된다. 즉 임계값의 *의미* 는 nSub 에 강하게 의존하며, 후속 작업에서는 이를 nSub 의 함수로 파라미터화하는 것이 바람직하다.
 
-베이스라인과 통합 B 의 verdict 가 같은 입력에서 다르게 나오는 사례는 1절 1.6 의 Wallet 4 를 참고. 이는 BSGS 의 노이즈가 아니라 *β·θ 의 의미 모델 변경* 으로 Phase 3 가 다른 부분 그래프를 뽑아온 결과다 — Phase 4 의 top-nSub 가 달라지면 Phase 5 의 부분 행렬도 달라지고, 그 위의 PageRank 도 달라진다.
+baseline 과 통합 B 의 판정이 동일 입력에서 다르게 나오는 사례 (예: §1 의 Wallet 4) 는 BSGS 의 노이즈가 아닌 β · θ 의 의미 모델 변경에서 유래한다. 의미 모델이 변경되면 Phase 3 가 다른 trust 분포를 산출하고, Phase 4 의 top-nSub 가 달라지며, 결과적으로 Phase 5 의 부분 행렬과 그 위의 PageRank 가 모두 달라진다.
 
-## 4.9 같은 예제 — Phase 4 의 top-K, Phase 5 의 멱법 반복, verdict
+---
 
-3 절 3.9 끝에서 얻은 PIR 결과 `[5.8, 3.6, 4.8, 2.0]` 가 wallet 30 에 대한 N=4 차원 trust 분포다. 여기서부터 부분 그래프 결정과 동형 PageRank 까지 트레이스를 이어간다. nSub = 3 으로 두자 (작아야 손으로 따라가기 쉽다).
+## 부록 4.A — N = 4 예제에 대한 동형 PageRank 의 손 계산
 
-### 4.9.1 양자화와 top-3 결정
+§3.A 의 끝에서 얻은 PIR 결과 `[5.8, 3.6, 4.8, 2.0]` 을 입력으로 하여, 부분 그래프 구성부터 verdict 산출까지의 절차를 손 계산으로 추적한다. 그래프의 작은 크기를 고려하여 nSub = 3 으로 둔다.
 
-복호 결과 vector 의 앞 4 슬롯 `[5.8, 3.6, 4.8, 2.0]` 에 `round(val * 1e5) / 1e5` 양자화를 적용해도 본 예제는 정수 + 한자리 소수라 그대로 살아남는다 (CKKS 노이즈는 약 10⁻⁹ 수준).
+### 4.A.1 양자화와 top-3 결정
 
-(idx, score) 쌍: [(0, 5.8), (1, 3.6), (2, 4.8), (3, 2.0)].
+복호 결과 vector 의 앞 4 슬롯 `[5.8, 3.6, 4.8, 2.0]` 에 1e-5 양자화를 적용해도 값이 정수 + 한 자리 소수이므로 변화가 없다. (idx, score) 쌍을 점수 기준 내림차순으로 정렬하면
 
-내림차순 정렬: [(0, 5.8), (2, 4.8), (1, 3.6), (3, 2.0)].
+$$[(0, 5.8), (2, 4.8), (1, 3.6), (3, 2.0)]$$
 
-상위 3 (nSub = 3): `topNodes = [0, 2, 1]`. 평가 대상의 globalIdx = 1 이 topNodes 안에 있고, subIdx = 2.
+이며, 상위 3 개는 `topNodes = [0, 2, 1]` 이다. 평가 대상 wallet 30 의 globalIdx = 1 이 topNodes 에 포함되어 있으며, 그 부분 그래프 내 위치는 subIdx = 2 이다.
 
-(만약 wallet 30 이 자기 top-3 에 못 들었다면 코드가 `topNodes[nSub-1] = 1` 로 마지막 자리에 강제 삽입했을 것이다. 본 예제는 그럴 일이 없지만, 일반 케이스에선 이 강제 삽입이 *평가 대상의 자기 PageRank 점수가 항상 정의되도록* 보장한다.)
+### 4.A.2 부분 행렬
 
-### 4.9.2 부분 행렬 M_sub
-
-`M_sub[i][j] = M_pub[topNodes[i]][topNodes[j]]`. topNodes = [0, 2, 1] 로 9 칸을 추출.
+`M_sub[i][j] = M_pub[topNodes[i]][topNodes[j]]` 로부터 9 개 성분을 추출한다.
 
 | | j=0 (idx 0) | j=1 (idx 2) | j=2 (idx 1) |
 |---|---:|---:|---:|
-| i=0 (idx 0) | M_pub[0][0]=0 | M_pub[0][2]=0 | M_pub[0][1]=4 |
-| i=1 (idx 2) | M_pub[2][0]=4 | M_pub[2][2]=0 | M_pub[2][1]=0 |
-| i=2 (idx 1) | M_pub[1][0]=3 | M_pub[1][2]=5 | M_pub[1][1]=0 |
+| i=0 (idx 0) | 0 | 0 | 4 |
+| i=1 (idx 2) | 4 | 0 | 0 |
+| i=2 (idx 1) | 3 | 5 | 0 |
 
-행렬 형태:
+행렬 표기:
 
-```
-M_sub = [ 0   0   4 ]
-        [ 4   0   0 ]
-        [ 3   5   0 ]
-```
+$$M_{\mathrm{sub}} = \begin{pmatrix} 0 & 0 & 4 \\ 4 & 0 & 0 \\ 3 & 5 & 0 \end{pmatrix}.$$
 
-(주의: PageRank 의 transition 은 *1-hop* 행렬 `M_pub` 위에서 도는 것이고, top-K 결정만 1+2-hop 의 `M_total` 으로 한다. 이 비대칭이 의도된 설계인가는 spec 의 미답 자리 중 하나지만, 코드는 분명히 이렇게 되어있다.)
+### 4.A.3 정규화와 텔레포트
 
-### 4.9.3 column normalization 과 teleport
+각 열의 합과 정규화 결과는 다음과 같다.
 
-각 열의 합을 구해 나누고 (column-stochastic), teleport 를 더한다.
+- col 0 의 합 = 7. 정규화 후 [0, 4/7, 3/7] ≈ [0, 0.5714, 0.4286]
+- col 1 의 합 = 5. 정규화 후 [0, 0, 1]
+- col 2 의 합 = 4. 정규화 후 [1, 0, 0]
 
-- col 0 합 = 0 + 4 + 3 = 7. 정규화: [0, 4/7, 3/7] ≈ [0, 0.5714, 0.4286]
-- col 1 합 = 0 + 0 + 5 = 5. 정규화: [0, 0, 1]
-- col 2 합 = 4 + 0 + 0 = 4. 정규화: [1, 0, 0]
+dangling 노드는 존재하지 않는다. α = 0.85, tele = 0.05 를 식 (4.1) 에 적용한 transition matrix T 는
 
-dangling 없음 (어느 col 도 합 = 0 아님). α = 0.85, tele = (1 − 0.85) / 3 = 0.05.
+$$T \approx \begin{pmatrix} 0.0500 & 0.0500 & 0.9000 \\ 0.5357 & 0.0500 & 0.0500 \\ 0.4143 & 0.9000 & 0.0500 \end{pmatrix}.$$
 
-transition matrix T = α · M_sub_norm + tele · 1:
+각 열의 합 검증: 0.05 + 0.5357 + 0.4143 = 1.0000, 0.05 + 0.05 + 0.9 = 1.0, 0.9 + 0.05 + 0.05 = 1.0. column-stochastic 성질이 보존된다.
 
-```
-T ≈ [ 0.0500   0.0500   0.9000 ]
-    [ 0.5357   0.0500   0.0500 ]
-    [ 0.4143   0.9000   0.0500 ]
-```
+### 4.A.4 멱법 반복
 
-각 열의 합 확인: 0.05 + 0.5357 + 0.4143 = 1.0000 ✓. 0.05 + 0.05 + 0.9 = 1.0 ✓. 0.9 + 0.05 + 0.05 = 1.0 ✓. column-stochastic 보존.
+초기 $V_0 = [1/3, 1/3, 1/3] \approx [0.3333, 0.3333, 0.3333]$ 로부터 $V_{t+1} = T \cdot V_t$ 의 반복을 적용한 결과는 다음 표와 같다 (소수점 4 자리 반올림).
 
-### 4.9.4 멱법 반복 10 회
-
-초기 V₀ = [1/3, 1/3, 1/3] ≈ [0.3333, 0.3333, 0.3333].
-
-**Iter 1**: V₁ = T · V₀
-
-- V₁[0] = 0.05·0.3333 + 0.05·0.3333 + 0.9·0.3333 = 0.3333
-- V₁[1] = 0.5357·0.3333 + 0.05·0.3333 + 0.05·0.3333 = 0.2119
-- V₁[2] = 0.4143·0.3333 + 0.9·0.3333 + 0.05·0.3333 = 0.4548
-
-**Iter 2**: V₂ = T · V₁
-
-- V₂[0] = 0.05·0.3333 + 0.05·0.2119 + 0.9·0.4548 = 0.4365
-- V₂[1] = 0.5357·0.3333 + 0.05·0.2119 + 0.05·0.4548 = 0.2119
-- V₂[2] = 0.4143·0.3333 + 0.9·0.2119 + 0.05·0.4548 = 0.3516
-
-(이후는 같은 곱셈의 반복이라 산수 결과만 적는다.)
-
-| iter | V[0] | V[1] | V[2] | 합 |
+| t | V[0] | V[1] | V[2] | 합 |
 |---:|---:|---:|---:|---:|
 | 0 | 0.3333 | 0.3333 | 0.3333 | 1.0000 |
 | 1 | 0.3333 | 0.2119 | 0.4548 | 1.0000 |
@@ -251,27 +224,30 @@ T ≈ [ 0.0500   0.0500   0.9000 ]
 | 9 | 0.3767 | 0.2344 | 0.3889 | 1.0000 |
 | 10 | 0.3806 | 0.2330 | 0.3865 | 1.0001 |
 
-(합의 마지막 자리 오차는 반올림 누적. 매 iter 끝의 sum-to-1 정규화 단계가 이 오차를 다시 1.0 으로 맞춰준다.)
+합의 마지막 자리에서 발생하는 ±0.0001 의 오차는 각 반복의 중간 결과를 4 자리 반올림한 데서 누적되는 양이며, 실제 코드에서는 매 반복 후의 sum-to-1 재정규화 (§4.7) 가 이를 다시 정확히 1 로 보정한다.
 
-10 iter 후 V ≈ [0.3806, 0.2330, 0.3865]. 1 자리 진동이 남아있는데 그래프가 워낙 작아서 (n = 3) 그렇다. 실 BitcoinOTC 의 nSub = 64/256 위에선 약 5 iter 면 10⁻⁴ 까지 수렴한다.
+본 예제의 nSub = 3 이라는 작은 차원에서는 1 자리 진동이 10 회 반복 이후에도 잔존한다. 실제 BitcoinOTC 의 nSub = 64 / 256 환경에서는 약 5 회 반복으로 10⁻⁴ 자리의 수렴이 관측된다.
 
-### 4.9.5 평가 대상의 점수와 verdict
+### 4.A.5 점수와 판정
 
-target wallet 30 의 subIdx = 2 (4.9.1 에서). 따라서 fheScore = V₁₀[2] ≈ 0.3865.
+평가 대상의 subIdx = 2 이므로 fheScore = $V_{10}[2] \approx 0.3865$ 이다. 임계값 0.0150 과 비교하면
 
-verdict: 0.3865 ≥ 0.0150 → **[APPROVED] Minimum threshold met.**
+$$0.3865 \geq 0.0150 \implies \texttt{[APPROVED] Minimum threshold met.}$$
 
-물론 이 점수가 인상적으로 큰 것은 nSub = 3 이라는 비현실적으로 작은 부분 그래프 위에서, wallet 30 이 wallet 10 과 wallet 20 모두에게서 직접 trust 를 받기 때문이다. 실 BitcoinOTC 의 nSub = 64 에선 균일 분포가 1/64 ≈ 0.0156 이라, "임계값 0.0150" 은 사실상 평균선 바로 아래 자리한다 — 그러니 verdict 가 모드 (β, θ) 에 민감하다. 1 절 1.6 의 Wallet 4 가 그 사례.
+본 예제에서 점수가 임계값을 큰 폭으로 상회하는 것은 nSub = 3 이라는 비현실적으로 작은 부분 그래프에서 wallet 30 이 다른 두 노드 (wallet 10, wallet 20) 로부터 직접적 신뢰를 모두 받기 때문이다. 실제 BitcoinOTC 의 nSub = 64 환경에서는 균일 분포 점수가 1/64 ≈ 0.0156 으로 임계값 직상에 위치하며, 따라서 판정이 의미 모델 (β, θ) 의 미세한 변화에 민감하게 반응한다.
 
-### 4.9.6 한 iter 의 동형 부분 — Phase 5 의 BSGS
+### 4.A.6 한 반복의 동형 부분
 
-위 멱법 반복은 모두 평문이지만, 코드의 Phase 5 는 같은 결과를 동형으로 만들어낸다. 한 iter 의 동형 부분만 짧게 요약한다.
+위 멱법 반복은 모두 평문 연산으로 기술하였으나, Phase 5 의 코드는 동일한 결과를 동형으로 산출한다. 한 반복의 동형 부분은 다음의 흐름을 따른다.
 
-- cipherV (encode + encrypt 된 logicalV): 슬롯에 `[V[0], V[1], V[2], 0, V[0], V[1], V[2], 0]` 식의 패턴 (`prBlockSize = 2·nSub = 6` 슬롯이지만 본 예제는 nSub = 3, slot_count = 6 단순화 가정).
-- m₁ = m₂ = 2 (`FindOptimalAsymmetricBSGS(3, 1.0)` 의 반환). 그러면 d ∈ {0, 1, 2} 가 (j, i) ∈ {(0,0), (0,1), (1,0)} 으로 쪼개진다. d = 3 은 nSub 를 넘어 인코딩 자체가 건너뛰어진다.
-- 각 (j, i) 의 평문은 T 의 d = j·m₁ + i 번째 대각선을 `slot_idx = (row + j·m₁) mod nSub` 로 인코딩.
-- baby_steps[0], [1] 사전 계산, j = 0..1 에 대해 평문 곱 + rescale + 누적, j = 1 의 결과를 m₁ = 2 슬롯 회전 후 합산.
+(i) cipherV 의 슬롯에 `[V[0], V[1], V[2], 0, V[0], V[1], V[2], 0]` 패턴의 평문이 인코딩되고 (`prBlockSize = 2 · nSub = 6` 의 가정 하에), 암호화된다.
 
-세부 슬롯 트레이스는 3 절 3.9 와 *같은 패턴* 이라 생략한다 — 입력이 one-hot 이 아니라 일반 V 벡터라는 점만 다르고, 결과 ciphertext 의 앞 nSub 슬롯에 정확히 `T · V` 가 들어있다.
+(ii) `FindOptimalAsymmetricBSGS(3, 1.0)` 가 m₁ = m₂ = 2 를 반환한다. d ∈ {0, 1, 2} 가 (j, i) ∈ {(0, 0), (0, 1), (1, 0)} 으로 분해된다. d = 3 은 nSub 를 초과하므로 인코딩되지 않는다.
 
-결과를 decrypt 한 다음 `max(0.0, val)` 으로 음수 clip → sum-to-1 정규화 → 다음 iter 의 `logicalV` 로. 매 iter 끝의 이 *decrypt + clip + 정규화 + re-encrypt* 가 4.5 에서 다룬 단일-당사자 가정의 결과다.
+(iii) 각 (j, i) 의 BsgsDiag 평문은 T 의 d 번째 대각선을 `slot_idx = (row + j · m₁) mod n_sub` 위치에 인코딩한다.
+
+(iv) baby_steps[0], baby_steps[1] 의 사전 계산 후, j = 0 부터 1 까지의 평문 곱과 rescale, 누적, 그리고 j = 1 의 결과를 m₁ = 2 슬롯 회전 후 합산한다.
+
+(v) 결과 ciphertext 의 앞 3 슬롯에 $T \cdot V$ 가 인코딩되어 있다. 이를 복호하고 §4.7 의 절단과 재정규화를 적용하면 다음 반복의 logicalV 가 산출된다.
+
+세부 슬롯 단위 트레이스는 §3.A 와 동일한 구조이므로 본 부록에서는 생략한다. 입력이 one-hot 이 아닌 일반적 확률 벡터라는 점만 다르며, 결과 ciphertext 의 앞 nSub 슬롯이 $T \cdot V$ 와 정확히 일치한다는 결론은 보조정리 3.1 의 직접적 귀결이다.
