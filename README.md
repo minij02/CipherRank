@@ -1,135 +1,132 @@
 # CipherRank
 
-Privacy-preserving sybil defense pipeline that combines Fully Homomorphic Encryption (CKKS) with Private Information Retrieval to evaluate wallet trust on a Bitcoin OTC transaction graph **without revealing which wallet is being analyzed**.
+비트코인 OTC 거래 그래프에서 특정 지갑의 신뢰도를 평가하는 sybil 방어 파이프라인이다. 서버는 어떤 지갑이 평가 대상인지 모른 채로, CKKS 기반 동형암호와 PIR을 결합해 PageRank 기반 점수를 산출한다. 클라이언트는 마지막에 자신의 점수 하나만 복호해서 받는다.
 
-A target wallet's trust score is computed end-to-end by the server in ciphertext form via PageRank on a blindly-extracted subgraph; only the final score reaches the client.
+## 파이프라인
 
-## Pipeline
+전체는 여섯 단계로 나뉜다.
 
-| Phase | Side | Operation |
-|---|---|---|
-| 1 | Server | Public Transaction Matrix Preparation. Loads `soc-sign-bitcoinotc.csv`, applies time-decay, builds the diagonal-packed plaintext cache used by PIR. |
-| 2 | Client | Multi-Target SIMD FHE-PIR Encryption (one-hot encoding of target wallet indices, batched into chunks). |
-| 3 | Server | Parallel Blind Subgraph Extraction via homomorphic matrix-vector multiplication. Output: per-target encrypted neighbor weights. |
-| 4 | Client | SIMD Subgraph Resolution & Mapping (top-K neighbor selection). |
-| 5 | — | FHE & plaintext PageRank power iteration on the nSub-dimensional subgraph (ITERATIONS = 10). |
-| 6 | Client | Precision validation + smart-contract verdict (`fheScore ≥ 0.0150` ⇒ APPROVED). |
+Phase 1에서 서버가 SNAP의 BitcoinOTC 데이터셋을 읽어 시간 감쇠를 적용한 거래 그래프를 만들고, PIR에 쓸 대각선 평문 데이터를 캐싱한다. Phase 2에서 클라이언트가 평가 대상 지갑들의 인덱스를 one-hot 벡터로 묶어 SIMD로 암호화해 보낸다. Phase 3에서 서버는 평가 대상이 누구인지 모른 채 동형 행렬-벡터 곱을 통해 이웃 가중치를 뽑아낸다. Phase 4에서 클라이언트가 결과를 복호해 서브그래프 핵심 노드 nSub개를 고르고, Phase 5에서 이 작은 서브그래프 위에서 동형 PageRank를 10회 돌린다. 마지막 Phase 6은 점수가 임계값 0.0150 이상인지로 승인/거부를 결정한다.
 
-## Project layout
+## 디렉토리 구성
 
 ```
-CipherRank.cpp              integrated bgsg + sparse pipeline (~930 LOC)
-CMakeLists.txt              SEAL 4.1.2 + OpenMP build
-soc-sign-bitcoinotc.csv     SNAP Bitcoin OTC dataset (35,592 rows)
-soc-sign-bitcoinotc-synthetic.csv  + 50 synthetic sybils (seed=1, scripts/)
+CipherRank.cpp              통합 파이프라인 (약 930줄)
+CMakeLists.txt              SEAL 4.1.2 + OpenMP 빌드
+soc-sign-bitcoinotc.csv     SNAP 데이터셋 (35,592행)
+soc-sign-bitcoinotc-synthetic.csv  합성 sybil 50개를 덧붙인 버전
 scripts/
-    sweep_runner.py         4-way (main/A1/A2/B/B-C2) sweep + R8'' driver
-    gen_synthetic_sybil.py  reproducible synthetic sybil generator
-results/*.json              raw sweep outputs
-docs/superpowers/specs/     design specs + measurement reports
+  sweep_runner.py           4-way 측정 러너
+  gen_synthetic_sybil.py    합성 sybil 생성기 (seed=1)
+results/*.json              raw 측정 데이터
+docs/superpowers/specs/     설계 문서와 측정 보고서
 ```
 
-## Quick start
+## 빌드와 실행
 
-Build (requires Microsoft SEAL 4.1.2, CMake ≥ 3.10, OpenMP via Homebrew on macOS):
+Microsoft SEAL 4.1.2, CMake 3.10 이상, OpenMP가 있어야 한다. macOS는 Homebrew로 libomp를 깔아두면 충분하다.
 
 ```bash
 mkdir -p build && cd build
 cmake .. && cmake --build .
 ```
 
-Run the integrated B pipeline on the default 4 target wallets:
+기본 파라미터로 한 번 돌려보려면 다음과 같이 한다.
 
 ```bash
 ./CipherRank -g 256 -s 64
 ```
 
-Multi-chunk run at nGlobal=1024 with 9 targets, tuned semantics:
+좀 더 큰 다중 청크 케이스는 이렇게 실행한다.
 
 ```bash
 ./CipherRank -g 1024 -s 256 -b1 1.0 -b2 0.30 -thr 0.05 \
     1 2 4 35 25 7 88 100 200
 ```
 
-CLI flags:
+명령행 옵션은 다음과 같다.
 
-| Flag | Meaning | Default |
+| 옵션 | 의미 | 기본값 |
 |---|---|---|
-| `-g <N>` | nGlobal — top-N most-frequent wallet space | 256 |
-| `-s <n>` | nSub — subgraph dimension | 64 |
-| `-b1 <f>` | β₁ (1-hop weight) | 1.0 |
-| `-b2 <f>` | β₂ (2-hop weight) | 0.30 |
-| `-thr <f>` | pruning threshold on weak 1-hop edges | 0.05 |
-| `-csv <path>` | dataset override | `../soc-sign-bitcoinotc.csv` |
-| *positional* | target wallet IDs | `1 2 4 35` |
+| `-g <N>` | nGlobal — 빈도 기준 상위 N개 지갑으로 제한 | 256 |
+| `-s <n>` | nSub — 서브그래프 차원 | 64 |
+| `-b1 <f>` | β₁, 1-hop 가중치 | 1.0 |
+| `-b2 <f>` | β₂, 2-hop 가중치 | 0.30 |
+| `-thr <f>` | 약한 1-hop 간선을 잘라낼 임계값 | 0.05 |
+| `-csv <path>` | 데이터셋 경로 변경 | `../soc-sign-bitcoinotc.csv` |
+| 위치 인자 | 평가 대상 지갑 ID | `1 2 4 35` |
 
-Run the spec-suggested R10'' verification mode (β₁=β₂=1, threshold=0 — algorithmically equivalent to `main`):
+main 브랜치와 같은 의미 모델로 돌려서 알고리즘 동등성(R1'')을 확인하려면 β₁=β₂=1, thr=0으로 주면 된다.
 
 ```bash
 ./CipherRank -g 1024 -s 256 -b1 1.0 -b2 1.0 -thr 0 \
     1 2 4 35 25 7 88 100 200
 ```
 
-## Headline results
+## 측정 결과 요약
 
-(Config B = nGlobal=1024, multi-chunk over 9 targets, OMP=4, single Apple-Silicon machine.)
+Config B(nGlobal=1024, 9개 타겟, 청크 5개, OMP=4) 기준이다. 단일 Apple Silicon 머신에서 측정했다.
 
-| Mode | Total wall-clock | vs main |
+| 모드 | 총 wall-clock | main 대비 |
 |---|---:|---:|
-| `main` | 78.2 s | 1.00 × |
-| A1 (bgsg + H-2) | 11.3 s | 6.9 × |
-| A2 (sparse only) | 73.2 s | 1.07 × |
-| **B (this branch)** | **6.7 s** (cold ≈ 3.9 s) | **11.7 ×** (cold ≈ 20 ×) |
-| nGlobal=4096 demo (B) | 37 s | main impractical |
+| main | 78.2s | 1.00× |
+| A1 (bgsg + H-2) | 11.3s | 6.9× |
+| A2 (sparse 단독) | 73.2s | 1.07× |
+| B (이 브랜치) | 6.7s (콜드 약 3.9s) | 11.7× (콜드 약 20×) |
+| nGlobal=4096 데모 (B) | 37s | main은 실행 비현실적 |
 
-R1''/R2''/R6''/R10'' all pass on a cold machine; R8'' on natural + synthetic sybil sets shows pruning does not compromise sybil defense.
+R1'' / R2'' / R6'' / R10'' 회귀 검증은 콜드 머신 조건에서 모두 통과했다. R8'' sybil regression은 자연 sybil 9+9와 합성 sybil 50개 두 세팅 모두에서 TPR 1.00이 나왔고, 가지치기를 끈 B-C2와 결과가 같았다. 결국 sparse 의미 모델 변경이 sybil 탐지 능력을 떨어뜨리진 않았다는 뜻이다.
 
-Full results live in `docs/superpowers/specs/`:
+세부 측정과 논의는 다음 문서에 흩어져 있다.
 
-- `2026-06-18-bgsg-strengthening-design.md` — A1 (BSGS + OMP + H-2) design v2
-- `2026-06-18-sparse-strengthening-design.md` — A2 (sparse Phase 1 + β-weighted hops) design v2
-- `2026-06-18-integrated-bgsg-sparse-design.md` — B (integration) design v2
-- `2026-06-18-integrated-bgsg-sparse-phase-gamma-results.md` — first MVB → full integration measurements
-- `2026-06-18-integrated-bgsg-sparse-sweep-results.md` — sampled coarse sweep + natural sybil R8''
-- `2026-06-18-integrated-bgsg-sparse-followup-results.md` — synthetic sybil + fine grid + bootstrap CI + thermal artifact
+- `2026-06-18-bgsg-strengthening-design.md` — A1 설계 v2 (BSGS + OMP + H-2)
+- `2026-06-18-sparse-strengthening-design.md` — A2 설계 v2 (sparse Phase 1 + β-가중 hop)
+- `2026-06-18-integrated-bgsg-sparse-design.md` — B 통합 설계 v2
+- `2026-06-18-integrated-bgsg-sparse-phase-gamma-results.md` — MVB에서 풀 통합까지
+- `2026-06-18-integrated-bgsg-sparse-sweep-results.md` — 샘플 sweep, 자연 sybil 결과
+- `2026-06-18-integrated-bgsg-sparse-followup-results.md` — 합성 sybil, 미세 그리드, bootstrap CI, 열 부하 관찰
 
-## Branch guide
+## 브랜치 구분
 
-| Branch | Purpose |
+| 브랜치 | 내용 |
 |---|---|
-| `main` | baseline pipeline (no BSGS, no sparse) |
-| `feat/sparse-twohop-precompute-experiment` | A2-only: Phase 1 sparse rewrite + β/threshold semantic |
-| `feat/bgsg-experiment` | A1-only: asymmetric BSGS + OMP + H-2 Phase 5 thread-local; also holds the v2 spec set |
-| `feat/bgsg-sparse-integrated` | **B (this branch):** integrated pipeline + sweep infrastructure + measurement reports |
+| `main` | 베이스라인 파이프라인 |
+| `feat/sparse-twohop-precompute-experiment` | A2만: Phase 1 sparse + β·threshold |
+| `feat/bgsg-experiment` | A1만: 비대칭 BSGS + OMP + Phase 5 thread-local. v2 spec 세 편도 여기에 보관 |
+| `feat/bgsg-sparse-integrated` | B (현재 브랜치). 통합 코드, sweep 인프라, 측정 보고서 |
 
-## Reproducing a sweep
+## Sweep 재현
 
 ```bash
-# coarse 4-way at nGlobal in {256, 1024}, N=3 reps each
+# nGlobal ∈ {256, 1024}, 4-way, N=3 반복
 python3 scripts/sweep_runner.py --coarse --reps 3 \
     --out results/coarse_sweep.json
 
-# natural sybil R8'' (9 sybil + 9 trusted)
+# 자연 sybil 9 + 신뢰 9
 python3 scripts/sweep_runner.py --sybil --reps 1 \
     --out results/r8_sybil.json
 
-# synthetic sybil (50 nodes, B vs B-C2 only)
-python3 scripts/gen_synthetic_sybil.py --input soc-sign-bitcoinotc.csv \
+# 합성 sybil 50 (B와 B-C2만 비교)
+python3 scripts/gen_synthetic_sybil.py \
+    --input soc-sign-bitcoinotc.csv \
     --output soc-sign-bitcoinotc-synthetic.csv --seed 1
 python3 scripts/sweep_runner.py --synthetic-sybil --reps 1 \
     --csv ../soc-sign-bitcoinotc-synthetic.csv \
     --out results/r8_synthetic_sybil.json
 ```
 
-The runner hard-codes the binary paths for the four branches. For multi-branch sweeps, create a git worktree per branch (`git worktree add ../CipherRank-a1 feat/bgsg-experiment`) and build each.
+`sweep_runner.py`는 네 브랜치의 빌드 경로를 직접 참조하기 때문에, 여러 브랜치를 같이 비교하려면 `git worktree add`로 브랜치별 작업 디렉토리를 만들어 각각 빌드해두는 게 가장 깔끔하다.
 
-## Known limitations
+## 알려진 한계
 
-- All measurements are on a single machine; **thermal throttle and sustained-load memory pressure shift wall-clock by 25-40 %** in extended sweeps (documented in followup-results sec 4 and sec 2c). The spec sec 6.5 protocol of 60 s idle between runs is honored for the canonical R10'' window.
-- Sybil regression uses BitcoinOTC's natural distrust proxies (9+9) and one synthetic ring (50). Hub-trust-mixed synthetic sybils and multi-dataset generalization are future work (see followup-results sec 5).
-- The B pipeline's auto-tune in Phase 5 still runs for diagnostic purposes; the (m1, m2) it computes is not consumed because Galois keys are fixed at startup from `weight=1.0`. Full Three-Pass (B0 in the spec) is partial.
-- β₂ = 0 used to throw SEAL "transparent ciphertext"; fixed by filtering all-zero entries after the Phase 1 reduce. See followup-results sec 2a.
+측정은 한 대의 머신에서만 진행했다. 긴 sweep을 연달아 돌리면 발열과 메모리 압박 때문에 wall-clock이 25~40% 늘어나는 현상이 반복적으로 나왔다. 자세한 양상은 followup-results 문서 4절에 정리해 두었고, 캐노니컬한 R10'' 측정값은 spec 6.5절의 권고대로 측정 사이에 60초씩 비워둔 조건에서 얻은 값이다.
 
-## License
+Sybil 검증에 쓴 표본 크기가 작다는 점도 함께 짚어둘 필요가 있다. 자연 sybil은 BitcoinOTC에서 음수 평균 평점을 가진 노드 9개 + 신뢰 노드 9개, 합성 sybil은 한 종류의 mutual ring 50개뿐이다. 트러스트 허브와 일부 연결을 가진 sybil 프로파일이나 다른 데이터셋으로의 일반화는 후속 작업으로 남겨두었다.
 
-Research / academic experiment. Microsoft SEAL is Apache 2.0; the SNAP Bitcoin OTC dataset is from the Stanford SNAP collection.
+B 파이프라인의 Phase 5에는 weight 자동 튜닝 측정이 여전히 들어 있다. 다만 측정값으로 도출한 (m1, m2)는 실제로 사용되지 않는다 — Galois 키가 초기화 시점에 weight=1.0 가정으로 이미 고정되기 때문이다. spec의 B0 풀 Three-Pass는 부분 구현 상태로 남아 있다.
+
+β₂=0으로 두면 SEAL이 "transparent ciphertext" 예외를 던지는 버그가 있었는데, Phase 1 reduce 단계에서 값이 0인 항목을 미리 거르도록 고쳐 해결했다. 경위는 followup-results 2a절에 적어 두었다.
+
+## 라이선스
+
+연구·학술 실험 용도. Microsoft SEAL은 Apache 2.0, BitcoinOTC 데이터셋은 Stanford SNAP 컬렉션의 라이선스를 따른다.
