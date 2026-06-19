@@ -25,11 +25,11 @@ for (int k = 0; k < num_chunks; k++) {
 
 서버가 보유한 BsgsDiag 리스트는 행렬 M = M_total = M_pub + β₂ · M_pub² 의 d 번째 대각선 정보를 슬롯에 인코딩한 것이다. 즉 모든 d ∈ [0, N) 에 대해
 
-$$\mathtt{diag}_d[\mathtt{row}] = M[\mathtt{row}][(\mathtt{row} + d) \bmod N]$$
+$$\mathrm{diag}_{d}[\mathrm{row}] = M[\mathrm{row}][(\mathrm{row} + d) \bmod N]$$
 
 가 성립한다. 일반적인 행렬-벡터 곱 y = M · x 는 대각선 합산으로 다음과 같이 표현된다.
 
-$$y[\mathtt{row}] = \sum_{d=0}^{N-1} \mathrm{rot}(x, d)[\mathtt{row}] \cdot \mathtt{diag}_d[\mathtt{row}] = \sum_{d=0}^{N-1} x[(\mathtt{row} + d) \bmod N] \cdot M[\mathtt{row}][(\mathtt{row} + d) \bmod N]. \tag{3.1}$$
+$$y[\mathrm{row}] = \sum_{d=0}^{N-1} \mathrm{rot}(x, d)[\mathrm{row}] \cdot \mathrm{diag}_{d}[\mathrm{row}] = \sum_{d=0}^{N-1} x[(\mathrm{row} + d) \bmod N] \cdot M[\mathrm{row}][(\mathrm{row} + d) \bmod N] \quad \cdots (3.1)$$
 
 x 가 위치 p 에 1 을 갖는 one-hot 일 경우 식 (3.1) 은 y[row] = M[row][p] 로 환원된다. 결과 ciphertext 의 슬롯 row 에는 "평가 대상이 p 일 때 p 가 row 에게 부여하는 신뢰의 1+2-홉 누적값" 이 적힌다.
 
@@ -47,9 +47,9 @@ baseline 구현 (`main` 브랜치) 은 식 (3.1) 의 합을 N 회의 반복으�
 
 식 (3.1) 의 d 를 `d = j · m₁ + i` (단, 0 ≤ i < m₁, 0 ≤ j < m₂, m₁ · m₂ ≥ N) 로 분해하면 합을 이중 합으로 재구성할 수 있다.
 
-$$y[\mathtt{row}] = \sum_{j=0}^{m_2-1} \mathrm{rot}\!\left( \sum_{i=0}^{m_1-1} \mathrm{rot}(x, i) \cdot \widetilde{\mathtt{diag}}_{i,j} \,,\, j \cdot m_1 \right)[\mathtt{row}], \tag{3.2}$$
+$$y[\mathrm{row}] = \sum_{j=0}^{m_2-1} \mathrm{rot}\!\left( \sum_{i=0}^{m_1-1} \mathrm{rot}(x, i) \cdot \widetilde{\mathrm{diag}}_{i,j} \,,\, j \cdot m_1 \right)[\mathrm{row}] \quad \cdots (3.2)$$
 
-여기서 $\widetilde{\mathtt{diag}}_{i,j}$ 는 `diag_{j·m₁ + i}` 를 역방향으로 j · m₁ 만큼 사전 회전한 평문이다. 즉 평문 인코딩 단계에서 row 의 슬롯 위치를 `(row + j · m₁) mod N` 으로 옮겨 둔다. §2.6 의 `slot_idx = (row + j · m₁) mod N` 가 정확히 이 인덱싱이다.
+여기서 $\widetilde{\mathrm{diag}}_{i,j}$ 는 `diag_{j·m₁ + i}` 를 역방향으로 j · m₁ 만큼 사전 회전한 평문이다. 즉 평문 인코딩 단계에서 row 의 슬롯 위치를 `(row + j · m₁) mod N` 으로 옮겨 둔다. §2.6 의 `slot_idx = (row + j · m₁) mod N` 가 정확히 이 인덱싱이다.
 
 식 (3.2) 의 핵심은 회전이 두 종류의 위치에서만 발생한다는 점이다.
 
@@ -82,7 +82,7 @@ BSGSParams FindOptimalAsymmetricBSGS(int N, double giant_weight) {
 
 `giant_weight = 1.0` 의 경우 최적해는 대칭 m₁ = m₂ = √N 으로 수렴한다. 본 시스템은 측정의 단순화를 위해 `giant_weight = 1.0` 을 고정값으로 사용하며, 그 결과 N = 1024 의 경우 m₁ = m₂ = 32, N = 4096 의 경우 m₁ = m₂ = 64 가 산출된다.
 
-설계 명세 (`A1 spec` 의 P2) 는 시스템 시작 시 더미 ciphertext 로 baby/giant 회전의 실제 시간을 측정하여 `giant_weight` 를 자동 조정하는 튜너를 제안한다. 그러나 이 weight 의 변화가 Galois key step 집합의 변화를 유발하는 의존 사이클이 존재하므로, 통합 단계의 안정성을 우선하여 현재는 측정값을 기록하되 사용하지는 않는다. 후속 작업으로의 분리는 §5 의 후속 항목에서 다룬다.
+설계 명세 (`A1 spec` 의 P2) 는 시스템 시작 시 더미 ciphertext 로 baby/giant 회전의 실제 시간을 측정하여 `giant_weight` 를 자동 조정하는 튜너를 제안한다. 그러나 이 weight 의 변화가 Galois key step 집합의 변화를 유발하는 의존 사이클이 존재하므로, 통합 단계의 안정성을 우선하여 현재는 측정값을 기록하되 사용하지는 않는다. 후속 작업으로의 분리는 §6 의 후속 항목에서 다룬다.
 
 ## 3.5 슬롯 패킹과 청크 경계 안전성
 
@@ -183,7 +183,7 @@ j = 1 의 BsgsDiag 는 (i = 0, d = 2) 와 (i = 1, d = 3) 의 두 항이다.
 
 j = 0 의 결과와 j = 1 의 (회전된) 결과를 합산한 cipherNeighbors 는 다음과 같다.
 
-$$\mathtt{cipherNeighbors} = [5.8, 3.6, 0, 0, 5.8, 3.6, 0, 0] + [0, 0, 4.8, 2.0, 0, 0, 4.8, 2.0] = [5.8, 3.6, 4.8, 2.0, 5.8, 3.6, 4.8, 2.0].$$
+$$\mathrm{cipherNeighbors} = [5.8, 3.6, 0, 0, 5.8, 3.6, 0, 0] + [0, 0, 4.8, 2.0, 0, 0, 4.8, 2.0] = [5.8, 3.6, 4.8, 2.0, 5.8, 3.6, 4.8, 2.0].$$
 
 앞 4 슬롯 `[5.8, 3.6, 4.8, 2.0]` 을 식 (3.1) 의 정의 (one-hot p = 1) 와 비교한다.
 
@@ -194,7 +194,7 @@ $$\mathtt{cipherNeighbors} = [5.8, 3.6, 0, 0, 5.8, 3.6, 0, 0] + [0, 0, 4.8, 2.0,
 | 2 | 4.8 | 4.8 | ✓ |
 | 3 | 2.0 | 2.0 | ✓ |
 
-모든 row 에 대해 정의식과의 일치가 확인된다. 뒤 4 슬롯에는 동일한 결과가 한 번 더 복제되어 나타나는데, 이는 보조정리 3.1 의 가정 (Q7 패딩에 의한 청크 내 두 영역 일치) 의 직접적 귀결이다. 단일 청크 시나리오에서는 패딩의 효과가 표면적으로 보이지 않으나, 다중 청크 시나리오에서는 §5.2 의 R6 (multi-chunk equivalence) 검증을 통해 패딩의 안전성이 직접 측정 가능한 형태로 드러난다.
+모든 row 에 대해 정의식과의 일치가 확인된다. 뒤 4 슬롯에는 동일한 결과가 한 번 더 복제되어 나타나는데, 이는 보조정리 3.1 의 가정 (Q7 패딩에 의한 청크 내 두 영역 일치) 의 직접적 귀결이다. 단일 청크 시나리오에서는 패딩의 효과가 표면적으로 보이지 않으나, 다중 청크 시나리오에서는 §6.2 의 R6 (multi-chunk equivalence) 검증을 통해 패딩의 안전성이 직접 측정 가능한 형태로 드러난다.
 
 ### 3.A.6 다중 청크의 경우
 

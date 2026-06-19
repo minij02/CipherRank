@@ -14,7 +14,8 @@ CipherRank는 신뢰 등급이 매겨진 거래 그래프 위에서 특정 지�
 | `docs/algorithm/02-phase1-그래프-전처리.md` | BitcoinOTC 로딩, 시간 감쇠, top-N 빈도 컷, 1-hop·2-hop 누적, 대각선 평문 캐싱 |
 | `docs/algorithm/03-phase3-bsgs-pir.md` | One-hot 인코딩, Halevi-Shoup 대각선 방식, 비대칭 BSGS의 수식과 비용 |
 | `docs/algorithm/04-phase5-동형-pagerank.md` | 부분 그래프 정규화, α=0.85 텔레포테이션, 동형 멱법 반복 10회, 복호·재암호 우회 |
-| `docs/algorithm/05-엣지케이스와-구현-주의.md` | 필터의 사각지대, 청크 경계와 Q7 패딩, C8 보조정리, β₂=0 SEAL 예외, 키 스텝셋, 측정의 함정 |
+| `docs/algorithm/05-결과분석.md` | MVB 단발 측정, 모드별 wall-clock, OpenMP 스케일링, β·θ sweep, sybil 검출, FHE vs 평문 정밀도 |
+| `docs/algorithm/06-엣지케이스와-구현-주의.md` | 필터의 사각지대, 청크 경계와 Q7 패딩, C8 보조정리, β₂=0 SEAL 예외, 키 스텝셋, 측정의 함정 |
 
 ## 빌드와 실행
 

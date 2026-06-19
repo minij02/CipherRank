@@ -65,19 +65,21 @@ for (const auto& [mid, w1] : outAdj[src]) {
 
 **1-홉 누적.** src 가 `(row + d)` 자리에 대응되고 mid 가 row 자리에 해당하므로,
 
-$$\mathtt{localDiag}[d_1][\mathtt{mid}] \mathrel{+}= \beta_1 \cdot w_1 = \beta_1 \cdot M_{\mathrm{pub}}[\mathtt{mid}][\mathtt{src}].$$
+$$\mathrm{localDiag}[d_1][\mathrm{mid}] \mathrel{{+}{=}} \beta_1 \cdot w_1 = \beta_1 \cdot M_{\mathrm{pub}}[\mathrm{mid}][\mathrm{src}].$$
 
 모든 src 에 대한 합산은 1-홉 행렬의 d 번째 대각선과 일치한다.
 
 **2-홉 누적.** (src, mid, dst) 경로에 대해
 
-$$M_{\mathrm{pub}}^2[\mathtt{dst}][\mathtt{src}] = \sum_{\mathtt{mid}} M_{\mathrm{pub}}[\mathtt{dst}][\mathtt{mid}] \cdot M_{\mathrm{pub}}[\mathtt{mid}][\mathtt{src}]$$
+$$M_{\mathrm{pub}}^{2}[\mathrm{dst}][\mathrm{src}] = \sum_{\mathrm{mid}} M_{\mathrm{pub}}[\mathrm{dst}][\mathrm{mid}] \cdot M_{\mathrm{pub}}[\mathrm{mid}][\mathrm{src}]$$
 
 가 성립하며, 따라서 β₂ · w₁ · w₂ 를 `localDiag[d₂][dst]` 에 누적한 결과는 β₂ · M_pub² 의 d 번째 대각선이 된다.
 
 이를 통합하면 누적 결과의 정의식은 다음과 같이 표현된다.
 
-$$\mathtt{sparseDiag}[d][\mathtt{row}] = \beta_1 \cdot M_{\mathrm{pub}}[\mathtt{row}][\mathtt{row} + d] + \beta_2 \cdot M_{\mathrm{pub}}^2[\mathtt{row}][\mathtt{row} + d] \quad (\text{단, 조건부 가지치기 하에서}). \tag{2.1}$$
+$$\mathrm{sparseDiag}[d][\mathrm{row}] = \beta_1 \cdot M_{\mathrm{pub}}[\mathrm{row}][\mathrm{row} + d] + \beta_2 \cdot M_{\mathrm{pub}}^{2}[\mathrm{row}][\mathrm{row} + d] \quad \cdots (2.1)$$
+
+(단, 조건부 가지치기 하에서 성립한다.)
 
 baseline 의 경우 β₁ = β₂ = 1, 가지치기 없음 (θ = 0) 의 특수 케이스에 해당한다. 본 시스템의 기본값은 β₁ = 1.0, β₂ = 0.30, θ = 0.05 이며, 이는 약한 1-홉 (w₁ < θ) 으로부터의 2-홉 전파를 차단함으로써 시간 감쇠가 큰 오래된 간선의 영향력을 추가로 감쇠시키는 역할을 한다.
 
@@ -111,11 +113,11 @@ for (int d = 0; d < nGlobal; d++)
 
 설계 의도를 세 가지로 정리한다.
 
-첫째, 결합 순서가 thread_id 순서로 고정된다. 부동소수점 덧셈이 결합법칙을 완전히 만족하지 않으므로, 동일 입력에 대해 동일 결과를 보장하려면 합산 순서 자체가 결정적이어야 한다. P = 4 든 P = 8 이든 cross-run 결과가 일치해야 §5 의 등가성 검증이 의미를 가진다.
+첫째, 결합 순서가 thread_id 순서로 고정된다. 부동소수점 덧셈이 결합법칙을 완전히 만족하지 않으므로, 동일 입력에 대해 동일 결과를 보장하려면 합산 순서 자체가 결정적이어야 한다. P = 4 든 P = 8 이든 cross-run 결과가 일치해야 §6 의 등가성 검증이 의미를 가진다.
 
 둘째, `std::map` 을 거치면서 row 가 자동으로 오름차순 정렬된다. 이후 BSGS 인코딩 단계에서 정해진 순서로 슬롯에 기록되므로 동일 입력에 대해 동일한 평문 직렬화가 보장된다.
 
-셋째, `val != 0.0` 가드는 β₂ = 0 의 특수 케이스에서 발생하는 *값이 모두 0 인 비공실 (non-empty) sparseDiag* 를 사전에 제거한다. 이 가드의 부재가 SEAL 의 `result ciphertext is transparent` 예외를 유발하는 경위는 §5.4 에서 별도로 논의한다.
+셋째, `val != 0.0` 가드는 β₂ = 0 의 특수 케이스에서 발생하는 *값이 모두 0 인 비공실 (non-empty) sparseDiag* 를 사전에 제거한다. 이 가드의 부재가 SEAL 의 `result ciphertext is transparent` 예외를 유발하는 경위는 §6.4 에서 별도로 논의한다.
 
 ## 2.6 BSGS 대각선 인코딩과 Q7 패딩
 

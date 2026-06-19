@@ -50,7 +50,7 @@ for (size_t c = 0; c < num_targets; c++) {
 }
 ```
 
-Q5 의 도입에 따라 `M_pub` 이 희소 표현으로 유지되므로, 부분 행렬 추출은 `operator[]` 가 아닌 const-safe 한 `SparseGet` 을 사용한다. `operator[]` 를 사용하는 경우 미존재 키에 대해 0 값이 자동 *삽입* 되어 const-safety 가 깨지고 메모리도 부풀어 오른다 (자세한 논의는 §5.5 의 Q5 항목).
+Q5 의 도입에 따라 `M_pub` 이 희소 표현으로 유지되므로, 부분 행렬 추출은 `operator[]` 가 아닌 const-safe 한 `SparseGet` 을 사용한다. `operator[]` 를 사용하는 경우 미존재 키에 대해 0 값이 자동 *삽입* 되어 const-safety 가 깨지고 메모리도 부풀어 오른다 (자세한 논의는 §6.5 의 Q5 항목).
 
 부분 행렬이 구성되면 column-stochastic 정규화가 적용된다. PageRank 의 transition matrix 는 각 열의 합이 1 이 되도록 정규화되어야 하며, 본 시스템은 다음 절차를 따른다.
 
@@ -72,7 +72,7 @@ PageRank 의 transition 은 *1-홉* 행렬 `M_pub` 위에서 정의되며, top-n
 
 α = 0.85 의 damping factor 와 균일 텔레포트는 PageRank 의 표준 형식을 따른다. transition 의 최종 형태는
 
-$$T[i][j] = \alpha \cdot \widehat{M}_{\mathrm{sub}}[i][j] + \frac{1 - \alpha}{n_{\mathrm{sub}}} \tag{4.1}$$
+$$T[i][j] = \alpha \cdot \widehat{M}_{\mathrm{sub}}[i][j] + \frac{1-\alpha}{n_{\mathrm{sub}}} \quad \cdots (4.1)$$
 
 로 표현되며, 여기서 $\widehat{M}_{\mathrm{sub}}$ 는 열 정규화된 부분 행렬이다.
 
@@ -88,7 +88,7 @@ $$T[i][j] = \alpha \cdot \widehat{M}_{\mathrm{sub}}[i][j] + \frac{1 - \alpha}{n_
 
 (ii) 동일 부분 그래프에 대한 평문과 동형 결과의 일치 여부를 통해 CKKS 노이즈 누적의 영향을 정량화.
 
-평문 멱법은 초기 벡터 $V_0 = (1/n_{\mathrm{sub}}, \ldots, 1/n_{\mathrm{sub}})$ 로부터 $V_{t+1} = T \cdot V_t$ 를 10 회 반복하여 $V_{10}$ 을 산출한다. 부분 그래프가 동일하다면 평문과 동형의 결과가 일치해야 한다는 가정 자체가 §5 의 R1 / R2 / R6 검증의 출발점이다.
+평문 멱법은 초기 벡터 $V_0 = (1/n_{\mathrm{sub}}, \ldots, 1/n_{\mathrm{sub}})$ 로부터 $V_{t+1} = T \cdot V_t$ 를 10 회 반복하여 $V_{10}$ 을 산출한다. 부분 그래프가 동일하다면 평문과 동형의 결과가 일치해야 한다는 가정 자체가 §6 의 R1 / R2 / R6 검증의 출발점이다.
 
 ## 4.5 동형 멱법 반복과 복호-재암호화 루프
 
@@ -102,9 +102,9 @@ Phase 5 의 동형 부분은 청크 루프 안에서 다음 5 단계를 ITER = 1
 
 수식으로 표현하면 한 반복은 다음과 같다.
 
-$$y = T \cdot V \quad \text{(CKKS 위에서 BSGS 로 동형 계산)} \tag{4.2}$$
+$$y = T \cdot V \quad \text{(CKKS 위에서 BSGS 로 동형 계산)} \quad \cdots (4.2)$$
 
-$$V_{\mathrm{new}} = \mathrm{clip}(\mathrm{decrypt}(y), 0) \,/\, \textstyle\sum_i \mathrm{clip}(\cdot)_i \tag{4.3}$$
+$$V_{\mathrm{new}} = \mathrm{clip}(\mathrm{decrypt}(y), 0) \,/\, \sum_{i} \mathrm{clip}(\cdot)_{i} \quad \cdots (4.3)$$
 
 평문 멱법과 등가인 구간은 1–3 단계이며, 단순화가 도입된 부분은 4–5 단계이다. 매 반복의 *끝* 에서 평문으로 복호되고 *시작* 에서 다시 암호화되는 이 루프를 본 보고서에서는 *decrypt–reencrypt loop* 로 부른다.
 
@@ -116,7 +116,7 @@ parms.set_coeff_modulus(CoeffModulus::Create(poly_modulus_degree, { 60, 45, 45, 
 
 는 useful multiplicative depth 가 약 2 이다. 10 회 반복의 동형 곱을 ciphertext 만으로 지속하려면 약 10 단계의 depth 가 요구되며, 이는 SEAL CKKS 4.1.2 가 지원하지 않는 bootstrapping 없이는 불가능하다.
 
-복호 후 재암호화는 CKKS 노이즈를 0 으로 초기화하고 ciphertext 의 useful depth 를 완전히 회복시킨다. 그러나 이 단순화는 서버가 비밀키를 소유해야 함을 함의하므로, §1.5 에서 명시한 단일 당사자 측정 가정의 직접적 원인이 된다. 진정한 PIR 위협 모델로의 확장 경로는 §5.7 의 후속 항목에서 다룬다.
+복호 후 재암호화는 CKKS 노이즈를 0 으로 초기화하고 ciphertext 의 useful depth 를 완전히 회복시킨다. 그러나 이 단순화는 서버가 비밀키를 소유해야 함을 함의하므로, §1.5 에서 명시한 단일 당사자 측정 가정의 직접적 원인이 된다. 진정한 PIR 위협 모델로의 확장 경로는 §6.7 의 후속 항목에서 다룬다.
 
 ## 4.6 Phase 5 의 BSGS — Phase 3 와의 차이
 
@@ -232,7 +232,7 @@ $$T \approx \begin{pmatrix} 0.0500 & 0.0500 & 0.9000 \\ 0.5357 & 0.0500 & 0.0500
 
 평가 대상의 subIdx = 2 이므로 fheScore = $V_{10}[2] \approx 0.3865$ 이다. 임계값 0.0150 과 비교하면
 
-$$0.3865 \geq 0.0150 \implies \texttt{[APPROVED] Minimum threshold met.}$$
+$$0.3865 \geq 0.0150 \;\Longrightarrow\; \texttt{[APPROVED]} \text{ Minimum threshold met.}$$
 
 본 예제에서 점수가 임계값을 큰 폭으로 상회하는 것은 nSub = 3 이라는 비현실적으로 작은 부분 그래프에서 wallet 30 이 다른 두 노드 (wallet 10, wallet 20) 로부터 직접적 신뢰를 모두 받기 때문이다. 실제 BitcoinOTC 의 nSub = 64 환경에서는 균일 분포 점수가 1/64 ≈ 0.0156 으로 임계값 직상에 위치하며, 따라서 판정이 의미 모델 (β, θ) 의 미세한 변화에 민감하게 반응한다.
 
